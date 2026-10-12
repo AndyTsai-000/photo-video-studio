@@ -711,7 +711,8 @@ const PANELS = {
         slider(body, { label, min, max, value: P.adj[k], def: 0, onStart: pushHistory, onInput: v => { P.adj[k] = v; requestRender(); } });
       }
       if (gid === 'quality') {
-        slider(body, { label: '匯出畫質（JPG、WebP）', min: 50, max: 100, value: EXP.photo.q, def: 95, fmt: v => v + '%', onInput: v => { EXP.photo.q = v; }, onEnd: saveExp });
+        body.append(h('h3', { text: '匯出畫質（JPG、WebP）' }));
+        chips(body, QUALITY_PRESETS, EXP.photo.q, v => { EXP.photo.q = v; saveExp(); });
         body.append(h('button', { class: 'btn wide', text: '解析度放大 2 倍', onclick: upscalePhoto }));
         body.append(h('p', { text: '目前 ' + P.base.width + ' × ' + P.base.height + ' 像素。放大能讓輸出尺寸變大，但不會多出原圖沒有的細節。' }));
       }

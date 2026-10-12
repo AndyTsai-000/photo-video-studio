@@ -12,6 +12,11 @@ try {
   const saved = JSON.parse(localStorage.getItem('exp') || '{}');
   for (const k in EXP) Object.assign(EXP[k], saved[k] || {});
 } catch (e) { /* 沒有儲存空間就用預設值 */ }
+// 圖片匯出畫質只提供幾個常用等級；之前存過的其他數值對到最接近的一級
+const QUALITY_PRESETS = [[70, '一般 70%'], [85, '高 85%'], [95, '極高 95%'], [100, '最高 100%']];
+for (const k of ['photo', 'collage']) {
+  EXP[k].q = QUALITY_PRESETS.map(p => p[0]).reduce((a, b) => (Math.abs(b - EXP[k].q) < Math.abs(a - EXP[k].q) ? b : a));
+}
 function saveExp() {
   try { localStorage.setItem('exp', JSON.stringify(EXP)); } catch (e) { /* 略過 */ }
 }
@@ -68,7 +73,7 @@ function openExportDialog() {
   if (mode !== 'video') {
     card.append(h('h3', { text: '格式' }));
     pick('fmt', [['jpg', 'JPG'], ['png', 'PNG（不失真）'], ['webp', 'WebP']]);
-    if (e.fmt !== 'png') slider(card, { label: '畫質', min: 50, max: 100, value: e.q, def: 95, fmt: v => v + '%', onInput: v => { e.q = v; }, onEnd: saveExp });
+    if (e.fmt !== 'png') { card.append(h('h3', { text: '畫質' })); pick('q', QUALITY_PRESETS); }
     card.append(h('h3', { text: '尺寸' }));
     if (mode === 'photo') {
       pick('size', PHOTO_SIZES);
