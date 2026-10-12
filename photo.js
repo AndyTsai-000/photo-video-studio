@@ -405,8 +405,23 @@ function composeCut(src, iw, ih) {
     o.globalCompositeOperation = 'saturation'; o.fillStyle = '#808080'; o.fillRect(0, 0, iw, ih);
     o.globalCompositeOperation = 'source-over';
   }
-  o.drawImage(sub, 0, 0);
+  // 主體可以被拖到別的位置、放大縮小（位移用原圖像素記錄，這裡換算成目前的輸出大小）
+  const k = iw / P.base.width, sc = c.scale || 1;
+  o.save();
+  o.translate(iw / 2 + (c.dx || 0) * k, ih / 2 + (c.dy || 0) * k);
+  o.scale(sc, sc);
+  o.drawImage(sub, -iw / 2, -ih / 2);
+  o.restore();
   return out;
+}
+// 背景是從原圖來的（模糊、黑白）時主體不能移動，不然原位置會留下一個殘影
+function cutMovable() {
+  return !!P.cut && ['transparent', 'color', 'gradient', 'image'].includes(P.cut.bg.type);
+}
+// 畫面上的位置 → 遮罩上的位置（主體被移動、縮放過時，修邊筆刷要換算回去）
+function cutToMask(p) {
+  const c = P.cut, sc = c.scale || 1, cx = P.base.width / 2, cy = P.base.height / 2;
+  return { x: (p.x - cx - (c.dx || 0)) / sc + cx, y: (p.y - cy - (c.dy || 0)) / sc + cy };
 }
 async function runCutout() {
   const base = P.base;
@@ -415,7 +430,7 @@ async function runCutout() {
     if (P.base !== base) return;   // 等待期間照片被換掉或改過了
     pushHistory();
     const old = P.cut && P.cut.bg;
-    P.cut = { mask, feather: 1, bg: old ? { ...old } : { type: 'transparent', color: '#ffffff', color2: '#62d2c6', img: null, blur: 50 } };
+    P.cut = { mask, feather: 1, dx: 0, dy: 0, scale: 1, bg: old ? { ...old } : { type: 'transparent', color: '#ffffff', color2: '#62d2c6', img: null, blur: 50 } };
     showTool('cutout'); requestRender();
     toast('去背完成，可以在右邊換背景');
   } catch (e) { aiErrorToast(e); }
@@ -670,7 +685,12 @@ function transformAll(nw, nh, draw, mapPoint, rotDelta) {
   const apply = src => { const c = mk(nw, nh), x = c.getContext('2d'); draw(x); x.drawImage(src, 0, 0); return c; };
   P.base = apply(P.base);
   P.paint = apply(P.paint);
-  if (P.cut) P.cut.mask = apply(P.cut.mask);
+  if (P.cut) {
+    P.cut.mask = apply(P.cut.mask);
+    // 主體的位移向量跟著畫面一起轉、翻、縮放
+    const a = mapPoint(0, 0), b = mapPoint(P.cut.dx || 0, P.cut.dy || 0);
+    P.cut.dx = b[0] - a[0]; P.cut.dy = b[1] - a[1];
+  }
   P.mark = null;
   for (const o of P.objects) { const p = mapPoint(o.x, o.y); o.x = p[0]; o.y = p[1]; o.rot += rotDelta || 0; }
   P.crop = { x: 0, y: 0, w: 1, h: 1 };
@@ -817,6 +837,7 @@ function stroke(br, a, b) {
     x.lineCap = 'round'; x.lineJoin = 'round'; x.lineWidth = d;
     if (br === 'maskErase') x.globalCompositeOperation = 'destination-out';
     x.strokeStyle = br === 'mark' ? '#ff3c5a' : '#ffffff';
+    if (br !== 'mark') { a = cutToMask(a); b = cutToMask(b); x.lineWidth = d / (P.cut.scale || 1); }
     x.beginPath(); x.moveTo(a.x, a.y); x.lineTo(b.x + 0.01, b.y + 0.01); x.stroke();
     x.restore();
     return;
@@ -971,6 +992,11 @@ PV.addEventListener('pointerdown', e => {
     return;
   }
   if (br) { startStroke(br, p); drag = { type: 'brush', br, last: p }; requestRender(); return; }
+  if (P.tool === 'cutout' && cutMovable()) {
+    // 去背工具裡直接拖曳：移動主體
+    drag = { type: 'cut', x: p.x, y: p.y, dx: P.cut.dx || 0, dy: P.cut.dy || 0, moved: false };
+    return;
+  }
   const o = hitObject(p);
   if (o) {
     drag = { type: 'obj', o, dx: p.x - o.x, dy: p.y - o.y, moved: false };
@@ -992,13 +1018,16 @@ PV.addEventListener('pointermove', e => {
   } else ring.hidden = true;
   if (!drag) return;
   if (drag.type === 'brush') { stroke(drag.br, drag.last, p); drag.last = p; }
-  else {
+  else if (drag.type === 'cut') {
+    if (!drag.moved) { pushHistory(); drag.moved = true; }
+    P.cut.dx = drag.dx + p.x - drag.x; P.cut.dy = drag.dy + p.y - drag.y;
+  } else {
     if (!drag.moved) { pushHistory(); drag.moved = true; }
     drag.o.x = p.x - drag.dx; drag.o.y = p.y - drag.dy;
   }
   requestRender();
 });
-const endDrag = () => { drag = null; retouchEnd(); };
+const endDrag = () => { const moved = drag && drag.type === 'cut' && drag.moved; drag = null; retouchEnd(); if (moved) showTool('cutout'); };
 PV.addEventListener('pointerup', endDrag);
 PV.addEventListener('pointercancel', endDrag);
 PV.addEventListener('pointerleave', () => { $('#brushRing').hidden = true; });
@@ -1193,7 +1222,7 @@ const PANELS = {
     }
     const c = P.cut, bg = c.bg, redraw = () => requestRender();
     el.append(h('h3', { text: '背景' }));
-    chips(el, [['transparent', '透明'], ['color', '純色'], ['gradient', '漸層'], ['image', '換成照片'], ['blur', '模糊原背景'], ['gray', '背景變黑白']], bg.type, v => { pushHistory(); bg.type = v; showTool('cutout'); redraw(); });
+    chips(el, [['transparent', '透明'], ['color', '純色'], ['gradient', '漸層'], ['image', '換成照片'], ['blur', '模糊原背景'], ['gray', '背景變黑白']], bg.type, v => { pushHistory(); bg.type = v; if (!cutMovable()) { c.dx = c.dy = 0; c.scale = 1; } showTool('cutout'); redraw(); });
     if (bg.type === 'transparent') el.append(h('p', { text: '匯出時選 PNG 才能保留透明背景。' }));
     if (bg.type === 'color' || bg.type === 'gradient') {
       el.append(h('h3', { text: bg.type === 'color' ? '背景顏色（白、藍、紅是證件照常用底色）' : '上方顏色' }));
@@ -1213,6 +1242,11 @@ const PANELS = {
       }));
     }
     if (bg.type === 'blur') slider(el, { label: '模糊程度', min: 5, max: 100, value: bg.blur, def: 50, onStart: pushHistory, onInput: v => { bg.blur = v; redraw(); } });
+    if (cutMovable()) {
+      el.append(h('p', { text: '在照片上按住主體拖曳，可以移動它的位置。' }));
+      slider(el, { label: '主體大小', min: 30, max: 250, value: Math.round((c.scale || 1) * 100), def: 100, fmt: v => v + '%', onStart: pushHistory, onInput: v => { c.scale = v / 100; redraw(); } });
+      if (c.dx || c.dy || (c.scale || 1) !== 1) el.append(h('button', { class: 'btn wide', text: '主體放回原本的位置和大小', onclick: () => { pushHistory(); c.dx = c.dy = 0; c.scale = 1; showTool('cutout'); redraw(); } }));
+    }
     slider(el, { label: '邊緣柔化', min: 0, max: 10, step: 0.5, value: c.feather, def: 1, onStart: pushHistory, onInput: v => { c.feather = v; redraw(); } });
     el.append(h('hr'), h('h3', { text: '修邊（去得不乾淨時用）' }));
     chips(el, [['', '不修'], ['maskAdd', '塗回主體'], ['maskErase', '擦掉多餘']], P.maskBrush, v => { P.maskBrush = v; showTool('cutout'); });
@@ -1354,7 +1388,7 @@ function showTool(tool) {
   syncCropBox();
   $('#brushRing').hidden = true;
   if (tool !== 'adjust') P.hslPick = false;
-  PV.style.cursor = activeBrush() || P.hslPick ? 'crosshair' : 'default';
+  PV.style.cursor = activeBrush() || P.hslPick ? 'crosshair' : tool === 'cutout' && cutMovable() ? 'move' : 'default';
   if (wasCrop !== (tool === 'crop')) requestRender();
 }
 function initPhoto() {

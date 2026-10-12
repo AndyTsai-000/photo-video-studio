@@ -234,6 +234,10 @@ input[type="color"] { width: 34px; height: 28px; padding: 0; border: 1px solid v
 /* 透明背景用棋盤格表示 */
 #pv { background: repeating-conic-gradient(#cfcad6 0 25%, #f4f1f7 0 50%) 0 0 / 20px 20px; }
 .mbar { background: #6b5bd6; color: var(--fg); line-height: 18px; left: 0; }
+.tl-drop { position: absolute; top: 20px; bottom: 0; left: 0; width: 4px; border-radius: 2px; background: var(--cool); pointer-events: none; z-index: 2; }
+.t-clips .clip { cursor: grab; }
+.reordering, .reordering .clip { cursor: grabbing; }
+.clip.dragging { opacity: .45; }
 .playhead { position: absolute; top: 0; bottom: 0; left: 0; width: 2px; background: var(--accent); pointer-events: none; }
 .playhead::before { content: ""; position: absolute; top: 0; left: -5px; border: 6px solid transparent; border-top-color: var(--accent); }
 

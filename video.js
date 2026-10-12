@@ -454,8 +454,40 @@ function addFreezeFrame() {
 }
 (function wireTimeline() {
   const inner = $('#tlInner');
-  let scrubbing = false;
+  let scrubbing = false, drag = null;
   const at = e => (e.clientX - inner.getBoundingClientRect().left) / V.pps;
+  // 拖曳中：算出放開後片段會插到第幾個位置，並把指示線移過去
+  const dropIndex = e => {
+    const t = at(e);
+    let start = 0, idx = V.clips.length;
+    for (let i = 0; i < V.clips.length; i++) {
+      const d = clipDur(V.clips[i]);
+      if (t < start + d / 2) { idx = i; break; }
+      start += d;
+    }
+    let x = 0;
+    for (let i = 0; i < idx; i++) x += clipDur(V.clips[i]);
+    $('#tlDrop').style.transform = 'translateX(' + (x * V.pps - 2) + 'px)';
+    return idx;
+  };
+  const endDrag = apply => {
+    scrubbing = false;
+    const d = drag;
+    drag = null;
+    if (!d || !d.active) return;
+    $('#tlDrop').hidden = true;
+    inner.classList.remove('reordering');
+    const from = V.clips.findIndex(c => c.id === d.id);
+    let to = d.to;
+    if (apply && from >= 0 && to !== from && to !== from + 1) {
+      const [clip] = V.clips.splice(from, 1);
+      if (to > from) to--;
+      V.clips.splice(to, 0, clip);
+      V.t = clipStart(clip);
+    }
+    rebuildTL(); vPanel(); seek(V.t);
+    vCommit();
+  };
   inner.addEventListener('pointerdown', e => {
     const clipEl = e.target.closest('[data-clip]'), textEl = e.target.closest('[data-text]');
     const sel = clipEl ? +clipEl.dataset.clip : null, selText = textEl ? +textEl.dataset.text : null;
@@ -463,12 +495,29 @@ function addFreezeFrame() {
       V.sel = sel; V.selText = selText;
       rebuildTL(); vPanel();
     }
-    scrubbing = true;
     inner.setPointerCapture(e.pointerId);
     seek(at(e));
+    // 按在片段上：可能是要拖曳換順序，先記下來，移動超過一小段才算；按在別處則是拖曳播放頭
+    if (clipEl && e.pointerType !== 'touch') drag = { id: sel, x0: e.clientX, active: false, to: -1 };
+    else scrubbing = true;
   });
-  inner.addEventListener('pointermove', e => { if (scrubbing) seek(at(e)); });
-  ['pointerup', 'pointercancel'].forEach(ev => inner.addEventListener(ev, () => { scrubbing = false; }));
+  inner.addEventListener('pointermove', e => {
+    if (drag) {
+      if (!drag.active && Math.abs(e.clientX - drag.x0) > 8) {
+        drag.active = true;
+        pause();
+        inner.classList.add('reordering');
+        $('#tlDrop').hidden = false;
+        const el = $('[data-clip="' + drag.id + '"]', inner);
+        if (el) el.classList.add('dragging');
+      }
+      if (drag.active) drag.to = dropIndex(e);
+      return;
+    }
+    if (scrubbing) seek(at(e));
+  });
+  inner.addEventListener('pointerup', () => endDrag(true));
+  inner.addEventListener('pointercancel', () => endDrag(false));
   $('#zoomRange').addEventListener('input', e => { V.pps = +e.target.value; rebuildTL(); });
   $('#playBtn').addEventListener('click', () => (V.playing ? pause() : play()));
 
