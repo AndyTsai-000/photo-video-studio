@@ -623,7 +623,7 @@ function vPanel() {
     el.append(h('button', { class: 'btn wide', 'aria-pressed': String(clip.fade), text: '開頭結尾淡入淡出', onclick: () => { clip.fade = !clip.fade; vPanel(); drawFrame(); } }));
     el = root;
     el.append(h('button', { class: 'btn wide', text: '把這個畫面送到「修圖」', onclick: () => { const L = locate(Math.min(V.t, Math.max(0, totalDur() - 0.001))); if (L.clip !== clip) seek(clipStart(clip) + 0.05); snapshotToPhoto(); } }));
-    el.append(h('button', { class: 'btn ghost wide', text: '回到專案設定', onclick: () => { V.sel = null; rebuildTL(); vPanel(); } }));
+    el.append(h('button', { class: 'btn ghost wide', text: '回到影片設定', onclick: () => { V.sel = null; rebuildTL(); vPanel(); } }));
     return;
   }
   if (text) {
@@ -658,7 +658,7 @@ function vPanel() {
     return;
   }
 
-  el.append(h('h2', { text: '剪輯專案' }));
+  el.append(h('h2', { text: '影片設定' }));
   el.append(h('button', { class: 'btn primary wide', text: '加入影片或圖片', onclick: async () => addMedia(await pickFiles($('#fileMedia'))) }));
   el.append(h('button', {
     class: 'btn wide', text: '在播放頭的片段加一段文字', onclick: () => {
