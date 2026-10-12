@@ -1,6 +1,7 @@
 // 拼圖模式
 const CV2 = $('#cv2');
 const COLLAGE_SIDE = 2400;
+const COLLAGE_MAX = 15;   // 一張拼圖最多幾張照片
 const C = {
   imgs: [], layout: 0, gap: 2, radius: 2, bg: '#ffffff', ratio: '1:1', sel: -1
 };
@@ -35,10 +36,16 @@ const LAYOUTS = {
     R([2, 4]), R([3, 3], [2, 1]), K([3, 3], [2, 1]), R([[2, 1], [1, 1], [1, 2]]), R([2, 1, 3])],
   7: [R([2, 3, 2]), R([3, 4]), R([4, 3]), K([2, 3, 2]), K([3, 4]), R([1, 3, 3]), R([3, 1, 3], [1, 2, 1]), R([2, 2, 3]), R([1, 2, 4])],
   8: [R([3, 2, 3]), R([4, 4]), K([4, 4]), R([2, 2, 2, 2]), R([2, 3, 3]), R([3, 3, 2]), K([3, 2, 3]), R([1, 3, 4]), R([2, 4, 2])],
-  9: [R([3, 3, 3]), R([2, 3, 4]), K([2, 3, 4]), R([4, 5]), R([1, 4, 4]), K([1, 4, 4]), R([4, 1, 4], [1, 2, 1]), R([3, 3, 3], [2, 1, 1]), K([3, 3, 3], [2, 1, 1]), R([2, 2, 2, 3])]
+  9: [R([3, 3, 3]), R([2, 3, 4]), K([2, 3, 4]), R([4, 5]), R([1, 4, 4]), K([1, 4, 4]), R([4, 1, 4], [1, 2, 1]), R([3, 3, 3], [2, 1, 1]), K([3, 3, 3], [2, 1, 1]), R([2, 2, 2, 3])],
+  10: [R([3, 4, 3]), R([2, 3, 3, 2]), R([5, 5]), K([3, 4, 3]), K([5, 5]), R([1, 3, 3, 3]), R([4, 3, 3]), R([2, 4, 4])],
+  11: [R([3, 4, 4]), R([4, 3, 4]), R([4, 4, 3]), R([2, 3, 3, 3]), R([3, 3, 3, 2]), K([4, 3, 4]), R([1, 5, 5])],
+  12: [R([4, 4, 4]), R([3, 3, 3, 3]), K([4, 4, 4]), K([3, 3, 3, 3]), R([6, 6]), R([2, 4, 4, 2]), R([3, 4, 5]), R([1, 3, 4, 4])],
+  13: [R([4, 5, 4]), R([3, 3, 4, 3]), R([3, 4, 3, 3]), K([4, 5, 4]), R([1, 4, 4, 4]), R([4, 4, 5]), R([2, 3, 4, 4])],
+  14: [R([4, 5, 5]), R([5, 4, 5]), R([3, 4, 4, 3]), R([4, 3, 4, 3]), K([5, 4, 5]), R([2, 4, 4, 4]), R([1, 4, 4, 5])],
+  15: [R([5, 5, 5]), R([3, 4, 4, 4]), R([4, 4, 4, 3]), R([3, 3, 3, 3, 3]), K([5, 5, 5]), K([3, 3, 3, 3, 3]), R([4, 5, 6]), R([1, 4, 5, 5])]
 };
 function layoutList() {
-  return LAYOUTS[clamp(C.imgs.length, 1, 9)];
+  return LAYOUTS[clamp(C.imgs.length, 1, COLLAGE_MAX)];
 }
 function currentLayout() {
   const list = layoutList();
@@ -49,7 +56,7 @@ function isStitch() { return (C.ratio === 'v' || C.ratio === 'h') && C.imgs.leng
 function stitchLayout(L) {
   const g = L * C.gap / 100, inner = L - 2 * g, rects = [];
   let pos = g;
-  for (const it of C.imgs.slice(0, 9)) {
+  for (const it of C.imgs.slice(0, COLLAGE_MAX)) {
     if (C.ratio === 'v') { const hh = inner * it.cv.height / it.cv.width; rects.push({ x: g, y: pos, w: inner, h: hh }); pos += hh + g; }
     else { const w = inner * it.cv.width / it.cv.height; rects.push({ x: pos, y: g, w, h: inner }); pos += w + g; }
   }
@@ -137,7 +144,7 @@ async function addCollageFiles(files) {
   if (!imgs.length) return;
   const before = C.imgs.length;
   for (const f of imgs) {
-    if (C.imgs.length >= 9) { toast('一張拼圖最多放 9 張圖'); break; }
+    if (C.imgs.length >= COLLAGE_MAX) { toast('一張拼圖最多放 ' + COLLAGE_MAX + ' 張圖'); break; }
     try { C.imgs.push({ cv: await fileToCanvas(f, 2400), ox: 0.5, oy: 0.5, zoom: 1 }); }
     catch (e) { toast('無法讀取 ' + f.name); }
   }
@@ -209,7 +216,7 @@ function collagePanel() {
   const el = $('#collagePanel');
   el.replaceChildren();
   el.append(h('h2', { text: '拼圖' }));
-  el.append(h('button', { class: 'btn primary wide', text: '加入圖片（最多 9 張）', onclick: async () => addCollageFiles(await pickFiles($('#fileImgs'))) }));
+  el.append(h('button', { class: 'btn primary wide', text: '加入圖片（最多 ' + COLLAGE_MAX + ' 張）', onclick: async () => addCollageFiles(await pickFiles($('#fileImgs'))) }));
   if (!C.imgs.length) { el.append(h('p', { text: '先選照片。選了幾張，這裡就會出現那個張數可以用的版型。' })); return; }
 
   const layHead = h('h3', { text: C.imgs.length + ' 張照片的版型' });
