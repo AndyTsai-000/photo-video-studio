@@ -5,15 +5,15 @@
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=LXGW+WenKai+TC:wght@400;700&family=Noto+Sans+TC:wght@400;500;700&family=Noto+Serif+TC:wght@500;700&display=swap">
 <link rel="stylesheet" href="app.css">
 
-<div id="app" data-mode="photo">
+<div id="app" data-mode="home">
   <header class="bar">
-    <div class="brand">光影<span>工作室</span></div>
+    <button class="brand" id="homeBtn" title="回首頁">光影<span>工作室</span></button>
     <nav class="modes" role="tablist" aria-label="工作模式">
-      <button role="tab" data-mode="photo" aria-selected="true">修圖</button>
+      <button role="tab" data-mode="photo" aria-selected="false">修圖</button>
       <button role="tab" data-mode="collage" aria-selected="false">拼圖</button>
       <button role="tab" data-mode="video" aria-selected="false">剪輯</button>
     </nav>
-    <div class="bar-actions">
+    <div class="bar-actions" id="barActions" hidden>
       <button id="undoBtn" class="btn ghost" title="復原（Ctrl+Z）">復原</button>
       <button id="redoBtn" class="btn ghost" title="重做（Ctrl+Y）">重做</button>
       <button id="openBtn" class="btn">開啟圖片</button>
@@ -21,7 +21,32 @@
     </div>
   </header>
 
-  <section class="mode" id="photo">
+  <section class="mode" id="home">
+    <div class="home-inner">
+      <h1>今天想做什麼？</h1>
+      <p class="home-lead">修圖、拼圖、剪輯影片都在這裡完成。檔案只在你的裝置上處理，不會上傳。</p>
+      <div class="home-cards">
+        <button class="home-card" data-go="photo">
+          <canvas id="homePhoto" width="480" height="300"></canvas>
+          <strong>修圖</strong>
+          <span>調色、濾鏡、美顏瘦臉、裁切拉正、文字貼圖、馬賽克、邊框</span>
+        </button>
+        <button class="home-card" data-go="collage">
+          <canvas id="homeCollage" width="480" height="300"></canvas>
+          <strong>拼圖</strong>
+          <span>最多 9 張照片自動排版，可調比例、間距、圓角，拼完直接送去修圖</span>
+        </button>
+        <button class="home-card" data-go="video">
+          <canvas id="homeVideo" width="480" height="300"></canvas>
+          <strong>剪輯</strong>
+          <span>修剪、分割、變速、濾鏡、文字、配樂、自動字幕，最高匯出 4K</span>
+        </button>
+      </div>
+      <p class="home-drop">也可以直接把照片或影片拖進這個畫面：一張照片進修圖，多張進拼圖，影片進剪輯。</p>
+    </div>
+  </section>
+
+  <section class="mode" id="photo" hidden>
     <nav class="tools" id="photoTools" aria-label="修圖工具"></nav>
     <div class="stage">
       <div class="fitbox">

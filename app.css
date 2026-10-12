@@ -40,7 +40,7 @@ button, select, input, textarea { font: inherit; color: inherit; }
   background: var(--surface);
   border-bottom: 1px solid var(--line);
 }
-.brand { font-family: var(--font-brand); font-weight: 700; font-size: 22px; letter-spacing: .04em; color: var(--accent); white-space: nowrap; }
+.brand { border: 0; background: none; padding: 0; cursor: pointer; font-family: var(--font-brand); font-weight: 700; font-size: 22px; letter-spacing: .04em; color: var(--accent); white-space: nowrap; }
 .brand span { color: var(--fg); font-weight: 400; margin-left: 2px; }
 .modes { display: flex; gap: 2px; padding: 3px; background: var(--bg); border-radius: 999px; }
 .modes button {
@@ -64,6 +64,23 @@ button, select, input, textarea { font: inherit; color: inherit; }
 select {
   background: var(--raised); border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px;
 }
+
+/* ── 首頁 ── */
+#home { display: block; overflow-y: auto; }
+.home-inner { max-width: 1040px; margin: 0 auto; padding: 40px 16px 48px; display: flex; flex-direction: column; gap: 14px; }
+.home-inner h1 { margin: 0; font-family: var(--font-brand); font-size: clamp(30px, 5vw, 44px); font-weight: 700; letter-spacing: .04em; text-wrap: balance; }
+.home-lead { margin: 0; color: var(--muted); font-size: 16px; max-width: 34em; }
+.home-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px; margin-top: 14px; }
+.home-card {
+  display: flex; flex-direction: column; gap: 6px; padding: 0 0 16px; text-align: left; cursor: pointer; overflow: hidden;
+  background: var(--surface); border: 1px solid var(--line); border-radius: 14px; transition: border-color .15s, transform .15s;
+}
+.home-card:hover { border-color: var(--accent); transform: translateY(-3px); }
+.home-card canvas { width: 100%; aspect-ratio: 16 / 10; object-fit: cover; display: block; margin-bottom: 8px; }
+.home-card strong { padding: 0 16px; font-size: 20px; color: var(--accent); }
+.home-card span { padding: 0 16px; color: var(--muted); font-size: 13px; }
+.home-drop { margin: 10px 0 0; color: var(--muted); font-size: 13px; }
+@media (prefers-reduced-motion: reduce) { .home-card { transition: none; } .home-card:hover { transform: none; } }
 
 /* ── 三個模式共用的版面 ── */
 .mode { flex: 1; min-height: 0; display: grid; }

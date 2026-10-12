@@ -1,5 +1,5 @@
 // 模式切換、上方工具列、匯出設定
-let MODE = 'photo';
+let MODE = 'home';
 const OPEN_LABEL = { photo: '開啟圖片', collage: '加入圖片', video: '加入素材' };
 
 // 匯出設定會記在瀏覽器裡，下次打開沿用
@@ -20,20 +20,30 @@ function setMode(mode) {
   if (MODE === 'video' && mode !== 'video') pause();
   MODE = mode;
   $('#app').dataset.mode = mode;
-  for (const id of ['photo', 'collage', 'video']) $('#' + id).hidden = id !== mode;
+  for (const id of ['home', 'photo', 'collage', 'video']) $('#' + id).hidden = id !== mode;
+  $('#barActions').hidden = mode === 'home';
   $$('.modes button').forEach(b => b.setAttribute('aria-selected', String(b.dataset.mode === mode)));
   $('#undoBtn').hidden = $('#redoBtn').hidden = mode === 'collage';
-  $('#openBtn').textContent = OPEN_LABEL[mode];
+  $('#openBtn').textContent = OPEN_LABEL[mode] || '';
   syncHistButtons();
   refit();
 }
 function refit() {
+  if (MODE === 'home') return;
   if (MODE === 'photo') { fit(PV); syncCropBox(); }
   else if (MODE === 'collage') drawCollage();
   else { fit(VC); rebuildTL(); drawFrame(); }
 }
 
 async function openForMode(files) {
+  if (MODE === 'home') {
+    // 在首頁拖進檔案：依檔案種類決定要進哪個模式
+    if (!files) return;
+    const imgs = files.filter(f => f.type.startsWith('image/'));
+    const media = files.some(f => f.type.startsWith('video/') || f.type.startsWith('audio/'));
+    if (!media && !imgs.length) { toast('這裡只能開圖片、影片或音樂檔'); return; }
+    setMode(media ? 'video' : imgs.length > 1 ? 'collage' : 'photo');
+  }
   if (MODE === 'photo') {
     const f = (files || await pickFiles($('#fileImg'))).find(x => x.type.startsWith('image/'));
     if (!f) return;
@@ -91,6 +101,19 @@ function openExportDialog() {
 $('#dlg').addEventListener('pointerdown', e => { if (e.target.id === 'dlg') closeExportDialog(); });
 
 $$('.modes button').forEach(b => b.addEventListener('click', () => setMode(b.dataset.mode)));
+$('#homeBtn').addEventListener('click', () => setMode('home'));
+$$('.home-card').forEach(b => b.addEventListener('click', () => setMode(b.dataset.go)));
+function drawHomePreviews() {
+  const cover = (id, src) => {
+    const c = $(id), s = Math.max(c.width / src.width, c.height / src.height);
+    c.getContext('2d').drawImage(src, (c.width - src.width * s) / 2, (c.height - src.height * s) / 2, src.width * s, src.height * s);
+  };
+  cover('#homePhoto', makeSample(0, 480, 300));
+  const col = mk(4, 4);
+  renderCollage(col, 0.2, true);
+  cover('#homeCollage', col);
+  cover('#homeVideo', makeSample(2, 480, 300));
+}
 $('#openBtn').addEventListener('click', () => openForMode());
 $('#exportBtn').addEventListener('click', openExportDialog);
 $('#undoBtn').addEventListener('click', () => (MODE === 'video' ? vUndo() : undo()));
@@ -117,7 +140,7 @@ window.addEventListener('keydown', e => {
   const tag = e.target.tagName;
   const typing = tag === 'TEXTAREA' || tag === 'SELECT' || (tag === 'INPUT' && e.target.type !== 'range');
   if (e.key === 'Escape') closeExportDialog();
-  if (typing || V.exporting || !$('#dlg').hidden) return;
+  if (typing || V.exporting || !$('#dlg').hidden || MODE === 'home') return;
   const key = e.key.toLowerCase(), cmd = e.ctrlKey || e.metaKey, video = MODE === 'video';
   if (MODE !== 'collage' && cmd && key === 'z') { e.preventDefault(); e.shiftKey ? (video ? vRedo() : redo()) : (video ? vUndo() : undo()); }
   else if (MODE !== 'collage' && cmd && key === 'y') { e.preventDefault(); video ? vRedo() : redo(); }
@@ -131,4 +154,5 @@ new ResizeObserver(refit).observe($('#app'));
 initPhoto();
 initCollage();
 initVideo();
-setMode('photo');
+drawHomePreviews();
+setMode('home');
