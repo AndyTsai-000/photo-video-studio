@@ -178,8 +178,9 @@ function syncMusic() {
   const m = V.music;
   if (!m) return;
   setGain(m.el, m.vol);
-  if (V.playing && V.t < m.dur) {
-    if (Math.abs(m.el.currentTime - V.t) > 0.15) m.el.currentTime = V.t;
+  if (V.playing && V.t + m.offset < m.dur) {
+    const want = V.t + m.offset;
+    if (Math.abs(m.el.currentTime - want) > 0.15) m.el.currentTime = want;
     m.el.play().catch(() => {});
   } else m.el.pause();
 }
@@ -214,7 +215,11 @@ function tick(now) {
       else V.t = Math.max(V.t, L.start + Math.max(0, (v.currentTime - c.in) / c.speed));
     }
   } else V.t += dt;
-  if (V.music && V.t >= V.music.dur) V.music.el.pause();
+  if (V.music) {
+    const m = V.music;
+    if (V.t + m.offset >= m.dur) m.el.pause();
+    else if (m.fadeOut) setGain(m.el, m.vol * clamp((total - V.t) / 2, 0, 1));
+  }
   if (V.t >= total) { finishPlayback(total); return; }
   drawFrame(); updatePlayhead();
   requestAnimationFrame(tick);
@@ -277,14 +282,14 @@ async function addVideoFile(f) {
   V.clips.push(clip);
   if (STT.auto && !STT.broken) queueCaptions(clip);
 }
-function setMusicFile(f) {
+function setMusicFile(f, meta) {
   if (V.music) V.music.el.pause();
   const a = new Audio();
   a.preload = 'auto';
   a.src = URL.createObjectURL(f);
-  V.music = { el: a, name: f.name, vol: 0.6, dur: 0 };
+  V.music = { el: a, name: (meta && meta.title) || f.name, vol: 0.6, dur: 0, offset: 0, fadeOut: false, credit: (meta && meta.credit) || '' };
   const m = V.music;
-  a.addEventListener('loadedmetadata', () => { m.dur = isFinite(a.duration) ? a.duration : 600; rebuildTL(); });
+  a.addEventListener('loadedmetadata', () => { m.dur = isFinite(a.duration) ? a.duration : 600; rebuildTL(); vPanel(); });
   a.addEventListener('error', () => { if (V.music === m) { V.music = null; rebuildTL(); vPanel(); } toast('這個瀏覽器無法播放「' + f.name + '」'); });
 }
 async function addMedia(files) {
@@ -340,7 +345,7 @@ function rebuildTL() {
   }
   const tm = $('#tlMusic');
   tm.replaceChildren();
-  if (V.music) tm.append(h('div', { class: 'mbar', style: 'width:' + Math.max(40, Math.min(V.music.dur || total, total) * pps) + 'px', text: '配樂　' + V.music.name }));
+  if (V.music) tm.append(h('div', { class: 'mbar', style: 'width:' + Math.max(40, Math.min(V.music.dur ? V.music.dur - V.music.offset : total, total) * pps) + 'px', text: '配樂　' + V.music.name }));
   updatePlayhead();
 }
 function updatePlayhead() {
@@ -516,10 +521,22 @@ function vPanel() {
       addClipText(L.clip);
     }
   }));
-  el.append(h('button', { class: 'btn wide', text: V.music ? '換一首配樂' : '加入配樂', onclick: async () => { const [f] = await pickFiles($('#fileAudio')); if (f) { pause(); setMusicFile(f); rebuildTL(); vPanel(); } } }));
+  el.append(h('button', { class: 'btn wide', text: V.music ? '換一首配樂' : '加入配樂（搜尋、貼網址或選檔）', onclick: openMusicDialog }));
   if (V.music) {
     const m = V.music;
+    el.append(h('p', { text: '配樂：' + m.name }));
     slider(el, { label: '配樂音量', min: 0, max: 100, step: 5, value: Math.round(m.vol * 100), def: 60, fmt: v => v + '%', onInput: v => { m.vol = v / 100; setGain(m.el, m.vol); } });
+    slider(el, { label: '從音樂的哪裡開始', min: 0, max: Math.max(1, Math.floor(m.dur) - 1), step: 1, value: Math.min(m.offset, Math.max(0, Math.floor(m.dur) - 1)), def: 0, fmt: v => fmtTime(v).replace(/\.0$/, ''), onStart: pause, onInput: v => { m.offset = v; rebuildTL(); } });
+    el.append(h('button', { class: 'btn wide', 'aria-pressed': String(m.fadeOut), text: '影片結尾音樂淡出', onclick: () => { m.fadeOut = !m.fadeOut; setGain(m.el, m.vol); vPanel(); } }));
+    if (m.credit) {
+      el.append(h('p', { text: '這首需要標示作者。公開發表影片時，請把下面這段文字放在說明欄：' }), h('p', { class: 'credit', text: m.credit }));
+      el.append(h('button', {
+        class: 'btn wide', text: '複製標示文字', onclick: () => {
+          const done = () => toast('已複製'), fail = () => toast('無法自動複製，請手動選取上面的文字');
+          try { navigator.clipboard.writeText(m.credit).then(done, fail); } catch (e) { fail(); }
+        }
+      }));
+    }
     el.append(h('button', { class: 'btn danger wide', text: '移除配樂', onclick: () => { m.el.pause(); V.music = null; rebuildTL(); vPanel(); } }));
   }
   el.append(h('h3', { text: '畫面比例' }));

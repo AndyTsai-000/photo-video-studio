@@ -129,9 +129,19 @@
 <input type="file" id="fileMedia" accept="video/*,image/*,audio/*" multiple hidden>
 <input type="file" id="fileAudio" accept="audio/*" hidden>
 
-<script src="core.js"></script>
-<script src="photo.js"></script>
-<script src="collage.js"></script>
-<script src="video.js"></script>
-<script src="stt.js"></script>
-<script src="main.js"></script>
+<script>
+  // 每次改版把 VERSION 加一。只有在 GitHub Pages 才加版本參數，避免瀏覽器繼續用舊的程式檔
+  (function () {
+    var VERSION = '6', bust = /github\.io$/.test(location.hostname) ? '?v=' + VERSION : '';
+    if (bust) {
+      var css = document.createElement('link');
+      css.rel = 'stylesheet'; css.href = 'app.css' + bust;
+      document.head.appendChild(css);
+    }
+    ['core', 'photo', 'collage', 'video', 'stt', 'music', 'main'].forEach(function (name) {
+      var s = document.createElement('script');
+      s.src = name + '.js' + bust; s.async = false;
+      document.body.appendChild(s);
+    });
+  })();
+</script>

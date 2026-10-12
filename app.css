@@ -209,6 +209,14 @@ input[type="color"] { width: 34px; height: 28px; padding: 0; border: 1px solid v
 .export-card h2 { margin: 0; font-size: 18px; }
 .export-card h3 { margin: 0; font-size: 12px; font-weight: 500; color: var(--muted); letter-spacing: .08em; }
 #dlgCard { width: 100%; max-height: 100%; overflow-y: auto; gap: 10px; }
+.music-form { display: flex; gap: 8px; }
+.music-form input { flex: 1; min-width: 0; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 7px 10px; }
+.music-list { display: flex; flex-direction: column; gap: 6px; max-height: 34vh; min-height: 90px; overflow-y: auto; padding-right: 4px; }
+.music-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 6px 8px; background: var(--raised); border-radius: 8px; }
+.music-meta { display: flex; flex-direction: column; min-width: 0; }
+.music-meta strong, .music-meta span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.music-meta span { font-size: 12px; color: var(--muted); }
+.credit { user-select: all; background: var(--bg); border-radius: 8px; padding: 8px; font-size: 12px; overflow-wrap: anywhere; }
 #dlgCard .actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 6px; }
 .export-card p { margin: 0; color: var(--muted); }
 .progress { height: 8px; background: var(--bg); border-radius: 999px; overflow: hidden; }

@@ -54,11 +54,12 @@ async function openForMode(files) {
 
 // ── 匯出視窗：格式、尺寸、畫質都在這裡選 ──
 const PHOTO_SIZES = [['0', '原始大小'], ['1080', '長邊 1080'], ['1920', '長邊 1920'], ['2560', '長邊 2560'], ['3840', '長邊 3840（4K）'], ['x2', '放大 2 倍']];
-function closeExportDialog() { $('#dlg').hidden = true; }
+function closeExportDialog() { $('#dlg').hidden = true; stopMusicPreview(); }
 function openExportDialog() {
   const mode = MODE, e = EXP[mode], card = $('#dlgCard');
   if (mode === 'video' && totalDur() <= 0) { toast('先加入影片或圖片'); return; }
   if (mode === 'collage' && !C.imgs.length) { toast('先加入圖片'); return; }
+  card.style.maxWidth = '';
   card.replaceChildren();
   const pick = (key, options) => chips(card, options, e[key], v => { e[key] = v; saveExp(); openExportDialog(); });
   card.append(h('h2', { text: mode === 'video' ? '匯出影片' : '匯出圖片' }));
