@@ -40,6 +40,17 @@ function refit() {
   else { fit(VC); rebuildTL(); drawFrame(); }
 }
 
+// 右邊工具列可以用箭頭收起來，讓畫面變大；各模式分開記
+const PANEL_OFF = { photo: false, collage: false, video: false };
+function setPanelOff(mode, off) {
+  if (PANEL_OFF[mode] === off) return;
+  PANEL_OFF[mode] = off;
+  const sec = $('#' + mode), b = $('.panel-toggle', sec);
+  sec.classList.toggle('panel-off', off);
+  b.setAttribute('aria-expanded', String(!off));
+  b.title = off ? '顯示工具列' : '隱藏工具列';
+  if (MODE === mode) { refit(); if (mode === 'photo') requestRender(); }
+}
 async function openForMode(files) {
   if (MODE === 'home') {
     // 在首頁拖進檔案：依檔案種類決定要進哪個模式
@@ -109,6 +120,7 @@ $('#dlg').addEventListener('pointerdown', e => { if (e.target.id === 'dlg') clos
 
 $$('.modes button').forEach(b => b.addEventListener('click', () => setMode(b.dataset.mode)));
 $('#homeBtn').addEventListener('click', () => setMode('home'));
+$$('.panel-toggle').forEach(b => b.addEventListener('click', () => { const m = b.closest('.mode').id; setPanelOff(m, !PANEL_OFF[m]); }));
 $$('.home-card').forEach(b => b.addEventListener('click', () => setMode(b.dataset.go)));
 function drawHomePreviews() {
   const cover = (id, src) => {

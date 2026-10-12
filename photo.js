@@ -1302,7 +1302,7 @@ function showTool(tool) {
 function initPhoto() {
   const nav = $('#photoTools');
   for (const [key, label] of PHOTO_TOOLS) {
-    nav.append(h('button', { 'data-tool': key, 'aria-pressed': 'false', text: label, onclick: () => { P.sel = null; showTool(key); requestRender(); } }));
+    nav.append(h('button', { 'data-tool': key, 'aria-pressed': 'false', text: label, onclick: () => { P.sel = null; setPanelOff('photo', false); showTool(key); requestRender(); } }));
   }
   $('#photoEmptyBtn').addEventListener('click', () => openForMode());
   $('#zoomIn').addEventListener('click', () => setZoom(P.zoom + 0.5));

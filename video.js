@@ -363,6 +363,9 @@ function rebuildTL() {
   const total = totalDur(), pps = V.pps, empty = !V.clips.length;
   $('#videoEmpty').hidden = !empty;
   VC.parentElement.hidden = empty;
+  // 還沒有素材時跟修圖、拼圖一樣：右邊工具列和時間軸都先收起來
+  $('#videoPanel').hidden = $('#video .timeline').hidden = empty;
+  $('#video').classList.toggle('is-empty', empty);
   if (!empty) fit(VC);
   $('#tlInner').style.width = Math.max(total * pps + 120, 0) + 'px';
   const ruler = $('#tlRuler');
