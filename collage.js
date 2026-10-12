@@ -89,10 +89,13 @@ function renderCollage(target, scale, final) {
     ctx.imageSmoothingQuality = 'high';
     ctx.drawImage(it.cv, r.x - (dw - r.w) * it.ox, r.y - (dh - r.h) * it.oy, dw, dh);
     ctx.restore();
-    if (!final && i === C.sel) {
+    const dropHere = !final && cDrag && cDrag.target === i;
+    if (!final && (i === C.sel || dropHere)) {
       ctx.save();
-      ctx.lineWidth = Math.max(3, W / 200); ctx.strokeStyle = '#ff5d8f';
-      roundRectPath(ctx, r.x, r.y, r.w, r.h, rad); ctx.stroke();
+      roundRectPath(ctx, r.x, r.y, r.w, r.h, rad);
+      if (dropHere) { ctx.fillStyle = 'rgba(98,210,198,.35)'; ctx.fill(); ctx.setLineDash([W / 60, W / 90]); }
+      ctx.lineWidth = Math.max(3, W / 200); ctx.strokeStyle = dropHere ? '#62d2c6' : '#ff5d8f';
+      ctx.stroke();
       ctx.restore();
     }
   });
@@ -132,26 +135,50 @@ function cellAt(e) {
   const i = rects.findIndex(c => x >= c.x && x <= c.x + c.w && y >= c.y && y <= c.y + c.h);
   return { i: i < C.imgs.length ? i : -1, empty: i >= C.imgs.length, rect: rects[i], k };
 }
+// 拖曳照片：拖到另一格放開就交換位置；在自己那格裡拖曳則是移動照片顯示的範圍
 let cDrag = null;
 CV2.addEventListener('pointerdown', e => {
   const hit = cellAt(e);
-  if (hit.empty) { pickFiles($('#fileImgs')).then(addCollageFiles); return; }
   if (C.sel !== hit.i) { C.sel = hit.i; collagePanel(); }
   drawCollage();
   if (hit.i < 0) return;
   CV2.setPointerCapture(e.pointerId);
-  cDrag = { ...hit, x: e.clientX, y: e.clientY, it: C.imgs[hit.i] };
+  const it = C.imgs[hit.i];
+  cDrag = { ...hit, x: e.clientX, y: e.clientY, it, ox0: it.ox, oy0: it.oy, target: -1 };
+  CV2.style.cursor = 'grabbing';
 });
 CV2.addEventListener('pointermove', e => {
   if (!cDrag) return;
-  const { it, rect, k } = cDrag, [dw, dh] = drawnSize(it, rect);
+  const { it, rect, k } = cDrag, over = cellAt(e).i;
   const dx = (e.clientX - cDrag.x) * k, dy = (e.clientY - cDrag.y) * k;
   cDrag.x = e.clientX; cDrag.y = e.clientY;
-  if (dw - rect.w > 0.5) it.ox = clamp(it.ox - dx / (dw - rect.w), 0, 1);
-  if (dh - rect.h > 0.5) it.oy = clamp(it.oy - dy / (dh - rect.h), 0, 1);
+  if (over >= 0 && over !== cDrag.i) {
+    // 已經拖到別格上：標出要交換的那一格，照片在原格的位置還原
+    cDrag.target = over;
+    it.ox = cDrag.ox0; it.oy = cDrag.oy0;
+  } else {
+    cDrag.target = -1;
+    const [dw, dh] = drawnSize(it, rect);
+    if (dw - rect.w > 0.5) it.ox = clamp(it.ox - dx / (dw - rect.w), 0, 1);
+    if (dh - rect.h > 0.5) it.oy = clamp(it.oy - dy / (dh - rect.h), 0, 1);
+  }
   drawCollage();
 });
-['pointerup', 'pointercancel'].forEach(ev => CV2.addEventListener(ev, () => { cDrag = null; }));
+function endCollageDrag(apply) {
+  if (!cDrag) return;
+  const { i, target } = cDrag;
+  cDrag = null;
+  CV2.style.cursor = 'grab';
+  if (apply && target >= 0) {
+    [C.imgs[i], C.imgs[target]] = [C.imgs[target], C.imgs[i]];
+    C.sel = target;
+    collagePanel();
+  }
+  drawCollage();
+}
+CV2.addEventListener('pointerup', () => endCollageDrag(true));
+CV2.addEventListener('pointercancel', () => endCollageDrag(false));
+CV2.style.cursor = 'grab';
 
 function layoutIcon(rects) {
   const c = mk(40, 40), x = c.getContext('2d');
@@ -181,18 +208,11 @@ function collagePanel() {
 
   el.append(h('hr'));
   const it = C.imgs[C.sel];
-  if (!it) el.append(h('p', { text: '點一格可以選取那張照片；按住拖曳可以調整照片在格子裡的位置。' }));
+  if (!it) el.append(h('p', { text: '按住照片拖到另一格，放開就會交換位置。在同一格裡拖曳，可以移動照片顯示的範圍。' }));
   else {
     el.append(h('h3', { text: '選取的照片（第 ' + (C.sel + 1) + ' 格）' }));
     slider(el, { label: '放大', min: 100, max: 300, value: Math.round(it.zoom * 100), def: 100, fmt: v => v + '%', onInput: v => { it.zoom = v / 100; drawCollage(); } });
-    const swap = d => {
-      const j = (C.sel + d + C.imgs.length) % C.imgs.length;
-      [C.imgs[C.sel], C.imgs[j]] = [C.imgs[j], C.imgs[C.sel]];
-      C.sel = j; collagePanel(); drawCollage();
-    };
     el.append(h('div', { class: 'chips' },
-      h('button', { class: 'btn', text: '換到前一格', onclick: () => swap(-1) }),
-      h('button', { class: 'btn', text: '換到後一格', onclick: () => swap(1) }),
       h('button', {
         class: 'btn', text: '換一張圖', onclick: async () => {
           const [f] = await pickFiles($('#fileImg'));
