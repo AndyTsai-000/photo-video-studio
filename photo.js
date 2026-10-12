@@ -621,13 +621,62 @@ function objSliders(el, o) {
   slider(el, { label: '不透明度', min: 10, max: 100, value: Math.round((o.alpha == null ? 1 : o.alpha) * 100), def: 100, fmt: v => v + '%', onStart: pushHistory, onInput: v => { o.alpha = v / 100; requestRender(); } });
   el.append(h('button', { class: 'btn danger wide', text: '刪除這個' + name, onclick: deleteSelected }));
 }
+// 自動調整：量照片的明暗分布和色偏，換算成滑桿數值（只動滑桿，不改原圖）
+function autoAdjust() {
+  const s = Math.min(1, 200 / Math.max(P.base.width, P.base.height));
+  const c = mk(P.base.width * s, P.base.height * s), x = c.getContext('2d');
+  x.drawImage(P.base, 0, 0, c.width, c.height);
+  const d = x.getImageData(0, 0, c.width, c.height).data, n = d.length / 4, hist = new Uint32Array(256);
+  let sr = 0, sg = 0, sb = 0, sl = 0, ssat = 0;
+  for (let i = 0; i < d.length; i += 4) {
+    const r = d[i], g = d[i + 1], b = d[i + 2], l = 0.299 * r + 0.587 * g + 0.114 * b, mx = Math.max(r, g, b);
+    hist[l | 0]++; sr += r; sg += g; sb += b; sl += l;
+    ssat += mx ? (mx - Math.min(r, g, b)) / mx : 0;
+  }
+  const pct = p => { let acc = 0; for (let i = 0; i < 256; i++) { acc += hist[i]; if (acc >= n * p) return i / 255; } return 1; };
+  const lo = pct(0.01), hi = pct(0.99), mean = sl / n / 255, sat = ssat / n;
+  const lim = (v, a) => Math.round(clamp(v, -a, a));
+  pushHistory();
+  resetAdj();
+  // 明暗：把最暗到最亮的範圍拉開（最多 1.7 倍），中間調往正中間靠六成。
+  // 換算成滑桿：對比負責拉開的倍率，亮度負責平移
+  const m = 1 + (Math.min(0.96 / Math.max(0.05, hi - lo), 1.8) - 1) * 0.85;
+  const mid = (lo + hi) / 2, tmid = mid + (0.5 - mid) * 0.6;
+  P.adj.contrast = lim((m - 1) / 1.5 * 100, 60);
+  P.adj.brightness = lim(((tmid - m * mid - 0.5) / m + 0.5) / 0.35 * 100, 100);
+  const newMean = m * (mean - mid) + tmid;
+  if (newMean < 0.42) P.adj.shadows = lim((0.45 - newMean) * 220, 45);
+  if (hi > 0.97 && newMean > 0.6) P.adj.highlights = -20;
+  // 色偏：只在紅藍明顯失衡時修，而且只拉回四分之一，免得把夕陽、藍天這類本來就偏色的照片修壞。
+  // 拉開對比會連帶放大色偏，所以直接用縮圖試算，找出能達到目標紅藍比的色溫
+  if (sr > 0 && sb > 0 && Math.abs(Math.log(sr / sb)) > 0.25) {
+    const target = Math.pow(sr / sb, 0.75), tmp = new Uint8ClampedArray(d.length);
+    const ratioAt = temp => {
+      tmp.set(d);
+      applyStage(tmp, buildStage({ brightness: P.adj.brightness / 100, contrast: P.adj.contrast / 100, shadows: P.adj.shadows / 100, highlights: P.adj.highlights / 100, temp: temp / 100 }));
+      let r = 0, bl = 0;
+      for (let i = 0; i < tmp.length; i += 4) { r += tmp[i]; bl += tmp[i + 2]; }
+      return r / Math.max(1, bl);
+    };
+    let low = -40, high = 40;
+    for (let i = 0; i < 8; i++) { const t = (low + high) / 2; if (ratioAt(t) < target) low = t; else high = t; }
+    P.adj.temp = Math.round((low + high) / 2);
+  }
+  if (sat < 0.35) P.adj.vibrance = 20;
+  P.adj.clarity = 10;
+  showTool('adjust');
+  requestRender();
+  toast('已自動調整，可以再用滑桿微調');
+}
 const PANELS = {
   adjust(el) {
-    el.append(h('h2', { text: '調整' }), h('p', { text: '在滑桿上點兩下可以歸零。' }));
+    el.append(h('h2', { text: '調整' }));
+    el.append(h('button', { class: 'btn primary wide', text: '自動調整', onclick: autoAdjust }));
+    el.append(h('p', { text: '自動調整會依照片的明暗和色偏設定下面的滑桿，之後可以再微調。在滑桿上點兩下可以歸零。' }));
     for (const [k, label, min, max] of ADJ) {
       slider(el, { label, min, max, value: P.adj[k], def: 0, onStart: pushHistory, onInput: v => { P.adj[k] = v; requestRender(); } });
     }
-    el.append(h('button', { class: 'btn wide', text: '全部歸零', onclick: () => { pushHistory(); resetAdj(); showTool('adjust'); requestRender(); } }));
+    el.append(h('button', { class: 'btn wide', text: '恢復預設', onclick: () => { pushHistory(); resetAdj(); showTool('adjust'); requestRender(); } }));
   },
   filter(el) {
     el.append(h('h2', { text: '濾鏡' }));
@@ -787,6 +836,9 @@ function syncPhotoEmpty() {
   $('#photoEmpty').hidden = !empty;
   PV.parentElement.hidden = empty;
   $('#compareBtn').hidden = empty;
+  // 還沒開圖時跟拼圖一樣：左邊工具和右邊面板都先收起來
+  $('#photoTools').hidden = $('#photoPanel').hidden = empty;
+  $('#photo').classList.toggle('is-empty', empty);
   if (empty) $('#photoInfo').textContent = '';
 }
 
