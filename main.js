@@ -47,7 +47,7 @@ async function openForMode(files) {
   if (MODE === 'photo') {
     const f = (files || await pickFiles($('#fileImg'))).find(x => x.type.startsWith('image/'));
     if (!f) return;
-    try { setPhotoImage(await fileToCanvas(f, PHOTO_MAX), false); } catch (e) { toast('無法讀取 ' + f.name); }
+    try { setPhotoImage(await fileToCanvas(f, PHOTO_MAX)); } catch (e) { toast('無法讀取 ' + f.name); }
   } else if (MODE === 'collage') addCollageFiles(files || await pickFiles($('#fileImgs')));
   else addMedia(files || await pickFiles($('#fileMedia')));
 }
@@ -59,6 +59,7 @@ function openExportDialog() {
   const mode = MODE, e = EXP[mode], card = $('#dlgCard');
   if (mode === 'video' && totalDur() <= 0) { toast('先加入影片或圖片'); return; }
   if (mode === 'collage' && !C.imgs.length) { toast('先加入圖片'); return; }
+  if (mode === 'photo' && !P.base) { toast('先開啟一張圖片'); return; }
   card.style.maxWidth = '';
   card.replaceChildren();
   const pick = (key, options) => chips(card, options, e[key], v => { e[key] = v; saveExp(); openExportDialog(); });

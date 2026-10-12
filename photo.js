@@ -45,7 +45,7 @@ const P = {
   adj: {}, preset: 'none', presetAmt: 100,
   beauty: { smooth: 0, whiten: 0, rosy: 0 },
   frame: { type: 'none', color: '#ffffff', size: 5 },
-  tool: 'adjust', hist: [], redo: [], isSample: true,
+  tool: 'adjust', hist: [], redo: [],
   crop: { x: 0, y: 0, w: 1, h: 1 }, cropRatio: 0,
   brushMode: 'doodle', brushColor: '#ff5d8f', brushSize: { doodle: 30, mosaic: 40, erase: 40, liquify: 45 },
   liqOn: false, liqStrength: 50, compare: false
@@ -93,7 +93,7 @@ function syncHistButtons() {
   $('#redoBtn').disabled = v ? !VH.redo.length : !P.redo.length;
 }
 
-function setPhotoImage(src, isSample) {
+function setPhotoImage(src) {
   const s = Math.min(1, PHOTO_MAX / Math.max(src.width, src.height));
   const base = mk(src.width * s, src.height * s);
   const ctx = base.getContext('2d');
@@ -106,8 +106,9 @@ function setPhotoImage(src, isSample) {
   P.beauty = { smooth: 0, whiten: 0, rosy: 0 };
   P.frame = { type: 'none', color: '#ffffff', size: 5 };
   P.crop = { x: 0, y: 0, w: 1, h: 1 };
-  P.hist = []; P.redo = []; P.isSample = !!isSample;
+  P.hist = []; P.redo = [];
   syncHistButtons();
+  syncPhotoEmpty();
   showTool(P.tool);
   requestRender();
 }
@@ -386,10 +387,7 @@ function requestRender() {
     if (!P.base) return;
     renderPhoto(PV, PREVIEW_MAX, { raw: P.compare });
     fit(PV);
-    $('#photoInfo').replaceChildren(
-      P.isSample ? h('span', { class: 'tag', text: '範例圖' }) : '',
-      P.base.width + ' × ' + P.base.height + ' 像素' + (P.isSample ? '　按「開啟圖片」換成你的照片' : '')
-    );
+    $('#photoInfo').textContent = P.base.width + ' × ' + P.base.height + ' 像素';
   });
 }
 
@@ -768,6 +766,7 @@ function showTool(tool) {
   const el = $('#photoPanel');
   el.replaceChildren();
   if (P.base) PANELS[tool](el);
+  else el.append(h('h2', { text: PHOTO_TOOLS.find(t => t[0] === tool)[1] }), h('p', { text: '先開啟一張圖片，這裡才會出現可以調整的項目。' }));
   syncCropBox();
   $('#brushRing').hidden = true;
   PV.style.cursor = activeBrush() ? 'crosshair' : 'default';
@@ -778,7 +777,17 @@ function initPhoto() {
   for (const [key, label] of PHOTO_TOOLS) {
     nav.append(h('button', { 'data-tool': key, 'aria-pressed': 'false', text: label, onclick: () => { P.sel = null; showTool(key); requestRender(); } }));
   }
-  setPhotoImage(makeSample(0, 1600, 1067), true);
+  $('#photoEmptyBtn').addEventListener('click', () => openForMode());
+  showTool('adjust');
+  syncPhotoEmpty();
+}
+// 還沒開圖時顯示引導，藏起畫布
+function syncPhotoEmpty() {
+  const empty = !P.base;
+  $('#photoEmpty').hidden = !empty;
+  PV.parentElement.hidden = empty;
+  $('#compareBtn').hidden = empty;
+  if (empty) $('#photoInfo').textContent = '';
 }
 
 // 匯出尺寸：EXP.photo.size 是 '0'（原始）、'x2'（放大兩倍）或指定的長邊像素
@@ -794,6 +803,7 @@ function photoExportSize() {
   return [Math.round((P.base.width + ins.l + ins.r) * s), Math.round((P.base.height + ins.t + ins.b) * s)];
 }
 function exportPhoto() {
+  if (!P.base) { toast('先開啟一張圖片'); return; }
   const c = mk(4, 4);
   renderPhoto(c, 0, { final: true, scale: photoExportScale() });
   saveCanvas(c, '修圖作品', EXP.photo);

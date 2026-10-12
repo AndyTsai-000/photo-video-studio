@@ -57,6 +57,11 @@
           </div>
           <div id="brushRing" hidden></div>
         </div>
+        <div class="empty" id="photoEmpty" hidden>
+          <strong>還沒有圖片</strong>
+          <span>開啟一張照片就能開始修圖，也可以直接拖進來或按 Ctrl+V 貼上。</span>
+          <button class="btn primary" id="photoEmptyBtn">開啟圖片</button>
+        </div>
       </div>
       <div class="stage-foot">
         <span id="photoInfo"></span>
@@ -70,6 +75,11 @@
     <div class="stage">
       <div class="fitbox">
         <div class="canvas-wrap"><canvas id="cv2"></canvas></div>
+        <div class="empty" id="collageEmpty" hidden>
+          <strong>還沒有圖片</strong>
+          <span>加入 2 到 9 張照片就能開始拼圖，也可以直接把照片拖進來。</span>
+          <button class="btn primary" id="collageEmptyBtn">加入圖片</button>
+        </div>
       </div>
       <div class="stage-foot"><span id="collageInfo"></span></div>
     </div>
@@ -137,7 +147,7 @@
 <script>
   // 每次改版把 VERSION 加一。只有在 GitHub Pages 才加版本參數，避免瀏覽器繼續用舊的程式檔
   (function () {
-    var VERSION = '7', bust = /github\.io$/.test(location.hostname) ? '?v=' + VERSION : '';
+    var VERSION = '8', bust = /github\.io$/.test(location.hostname) ? '?v=' + VERSION : '';
     if (bust) {
       var css = document.createElement('link');
       css.rel = 'stylesheet'; css.href = 'app.css' + bust;

@@ -614,7 +614,7 @@ function snapshotToPhoto() {
   V.res = 1440; setVideoSize();
   const shot = cloneCanvas(VC);
   V.res = 720; setVideoSize();
-  setPhotoImage(shot, false);
+  setPhotoImage(shot);
   setMode('photo');
   toast('已把畫面送到修圖');
 }
