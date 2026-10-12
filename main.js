@@ -203,9 +203,15 @@ new ResizeObserver(refit).observe($('#app'));
 // 首頁最下面顯示版本；用 LINE 等內建瀏覽器開啟時提醒換瀏覽器
 $('#verLine').textContent = '版本 ' + (window.APP_VERSION || '?');
 if (inAppBrowser()) {
-  $('#inAppWarn').hidden = false;
-  $('#inAppWarn').classList.add('warn');
-  $('#inAppWarn').textContent = '你現在是用 ' + inAppBrowser() + ' 內建的瀏覽器開啟，匯出的檔案常常存不下來。請點右上角的選單，選「用預設瀏覽器開啟」（Safari 或 Chrome）。';
+  // 還留在 LINE、Facebook 這類 App 內建的瀏覽器裡：每個畫面上方都提醒，並提供複製網址
+  const app = inAppBrowser();
+  $('#inAppBar').hidden = false;
+  $('#inAppText').textContent = '你現在是用 ' + app + ' 內建的瀏覽器開啟，做好的圖片和影片存不下來。請點右上角的選單，選「用預設瀏覽器開啟」；或複製網址，貼到 Safari、Chrome。';
+  $('#inAppCopy').addEventListener('click', () => {
+    const link = location.origin + location.pathname;
+    const done = () => toast('網址已複製，請打開 Safari 或 Chrome 貼上'), fail = () => toast('請手動複製：' + link, 8000);
+    try { navigator.clipboard.writeText(link).then(done, fail); } catch (e) { fail(); }
+  });
 }
 // 瀏覽器有時會留著舊的首頁檔，導致看到的還是舊版：開啟時向伺服器確認一次，有新版就自動重新載入
 if (/github\.io$/.test(location.hostname)) {

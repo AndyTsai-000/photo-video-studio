@@ -24,6 +24,11 @@
     </div>
   </header>
 
+  <div class="inapp-bar" id="inAppBar" hidden>
+    <span id="inAppText"></span>
+    <button id="inAppCopy" class="btn small">複製網址</button>
+  </div>
+
   <section class="mode" id="home">
     <div class="home-inner">
       <h1>今天想做什麼？</h1>
@@ -195,9 +200,14 @@
 <input type="file" id="fileAudio" accept="audio/*" hidden>
 
 <script>
+  // 在 LINE 裡點連結會用 LINE 內建的瀏覽器開啟，那裡不能存檔也不能分享。
+  // LINE 認得網址上的 openExternalBrowser=1：帶著它重新開一次，LINE 就會改用手機的預設瀏覽器
+  if (/(^|[^a-z])Line\//i.test(navigator.userAgent) && !/[?&]openExternalBrowser=1/.test(location.search)) {
+    location.replace(location.pathname + (location.search ? location.search + '&' : '?') + 'openExternalBrowser=1' + location.hash);
+  }
   // 每次改版把 VERSION 加一。只有在 GitHub Pages 才加版本參數，避免瀏覽器繼續用舊的程式檔
   (function () {
-    var VERSION = '36', bust = /github\.io$/.test(location.hostname) ? '?v=' + VERSION : '';
+    var VERSION = '37', bust = /github\.io$/.test(location.hostname) ? '?v=' + VERSION : '';
     window.APP_VERSION = VERSION;
     if (bust) {
       var css = document.createElement('link');

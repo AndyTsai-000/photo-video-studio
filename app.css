@@ -285,6 +285,9 @@ input[type="color"] { width: 34px; height: 28px; padding: 0; border: 1px solid v
 .music-meta span { font-size: 12px; color: var(--muted); }
 .credit { user-select: all; background: var(--bg); border-radius: 8px; padding: 8px; font-size: 12px; overflow-wrap: anywhere; }
 .warn { color: var(--danger) !important; }
+.inapp-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 8px 16px; background: var(--danger); color: #2a0a05; font-size: 13px; font-weight: 500; }
+.inapp-bar span { flex: 1 1 220px; min-width: 0; }
+.inapp-bar .btn { background: #2a0a05; border-color: #2a0a05; color: #ffffff; }
 .save-preview { width: 100%; max-height: 38vh; object-fit: contain; border-radius: 8px; background: var(--bg); }
 #dlgCard .actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 6px; }
 .export-card p { margin: 0; color: var(--muted); }
