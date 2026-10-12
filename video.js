@@ -47,9 +47,10 @@ function textLocal(tx, c) {
 function addClipText(c) {
   const L = locate(V.t), local = L.clip === c ? Math.min(L.local, Math.max(0, clipDur(c) - 0.5)) : 0;
   const k = c.kind === 'video' ? c.speed : 1;
-  const tx = { id: ++vid, clip: c.id, at: (c.kind === 'video' ? c.in : 0) + local * k, dur: 3 * k, text: '輸入文字', pos: 'bottom', size: 7, color: '#ffffff' };
+  const tx = { id: ++vid, clip: c.id, at: (c.kind === 'video' ? c.in : 0) + local * k, dur: Math.max(1, clipDur(c) - local) * k, text: '輸入文字', pos: 'bottom', size: 7, color: '#ffffff' };
   V.texts.push(tx); V.selText = tx.id; V.sel = null;
   rebuildTL(); vPanel(); seek(clipStart(c) + local + 0.3);
+  selectAllIn('#vTextEdit');
 }
 function videoDims(res) {
   const [a, b] = V_ASPECTS[V.aspect];
@@ -573,7 +574,7 @@ function vPanel() {
     el.append(h('label', { class: 'field', for: 'vTextEdit' }, '內容', ta));
     const fmt = v => v.toFixed(1) + ' 秒';
     slider(el, { label: '出現時間（片段內）', min: 0, max: Math.max(0.1, clipDur(owner)), step: 0.1, value: clamp((text.at - base) / k, 0, clipDur(owner)), fmt, onStart: pause, onInput: v => { text.at = base + v * k; rebuildTL(); seek(clipStart(owner) + v + 0.05); } });
-    slider(el, { label: '顯示長度', min: 0.3, max: 15, step: 0.1, value: clamp(text.dur / k, 0.3, 15), def: 3, fmt, onInput: v => { text.dur = v * k; refresh(); } });
+    slider(el, { label: '顯示長度', min: 0.3, max: Math.max(15, Math.ceil(clipDur(owner))), step: 0.1, value: clamp(text.dur / k, 0.3, Math.max(15, Math.ceil(clipDur(owner)))), fmt, onInput: v => { text.dur = v * k; refresh(); } });
     el.append(h('hr'), h('h3', { text: text.auto ? '樣式（這個片段的字幕一起套用）' : '樣式' }));
     chips(el, [['top', '上方'], ['middle', '中間'], ['bottom', '下方']], st.pos, v => { st.pos = v; drawFrame(); });
     swatches(el, ['#ffffff', '#ffd24a', '#ff5d8f', '#62d2c6', '#1a1a1a'], st.color, c => { st.color = c; drawFrame(); });

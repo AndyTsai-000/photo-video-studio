@@ -972,6 +972,7 @@ function addObject(o) {
   loadFontFor(o);
   showTool(o.type === 'text' ? 'text' : 'sticker');
   requestRender();
+  if (o.type === 'text') selectAllIn('#textEdit');
 }
 function deleteSelected() {
   if (!P.sel) return;

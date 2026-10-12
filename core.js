@@ -115,6 +115,13 @@ async function fileToCanvas(file, maxSide) {
   return c;
 }
 
+// 剛加入的文字：游標直接放進輸入框並全選，打字就會取代預設的「輸入文字」，不用自己先刪
+function selectAllIn(sel) {
+  const ta = $(sel);
+  if (!ta) return;
+  ta.focus();
+  ta.select();
+}
 function pickFiles(input) {
   return new Promise(res => {
     input.value = '';
