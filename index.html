@@ -17,7 +17,6 @@
       <button id="undoBtn" class="btn ghost" title="復原（Ctrl+Z）">復原</button>
       <button id="redoBtn" class="btn ghost" title="重做（Ctrl+Y）">重做</button>
       <button id="openBtn" class="btn">開啟圖片</button>
-      <select id="exportOpt" aria-label="匯出格式"></select>
       <button id="exportBtn" class="btn primary">匯出</button>
     </div>
   </header>
@@ -60,6 +59,11 @@
     </div>
     <aside class="panel" id="videoPanel"></aside>
     <div class="timeline">
+      <div class="stt-bar" id="sttBar" hidden>
+        <span id="sttText"></span>
+        <div class="progress"><div id="sttProgress"></div></div>
+        <button id="sttCancel" class="btn small">取消字幕</button>
+      </div>
       <div class="tl-tools">
         <button id="playBtn" class="btn primary small">播放</button>
         <span id="timeLabel" class="time">0:00.0 / 0:00.0</span>
@@ -92,6 +96,7 @@
     <button id="cancelExport" class="btn">取消匯出</button>
   </div>
 </div>
+<div id="dlg" hidden><div class="export-card" id="dlgCard"></div></div>
 <div id="toast" role="status" aria-live="polite" hidden></div>
 
 <input type="file" id="fileImg" accept="image/*" hidden>
@@ -103,4 +108,5 @@
 <script src="photo.js"></script>
 <script src="collage.js"></script>
 <script src="video.js"></script>
+<script src="stt.js"></script>
 <script src="main.js"></script>

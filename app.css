@@ -178,14 +178,21 @@ input[type="color"] { width: 34px; height: 28px; padding: 0; border: 1px solid v
 }
 .tbar { background: var(--cool); color: var(--cool-ink); border: 2px solid transparent; line-height: 18px; }
 .tbar[aria-selected="true"] { border-color: var(--fg); }
+.tbar.auto { background: #ffd24a; color: #2b2000; }
+.stt-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 6px 16px; background: var(--raised); font-size: 13px; }
+.stt-bar .progress { flex: 1; min-width: 80px; }
+#sttProgress { height: 100%; width: 0; background: var(--cool); }
 .mbar { background: #6b5bd6; color: var(--fg); line-height: 18px; left: 0; }
 .playhead { position: absolute; top: 0; bottom: 0; left: 0; width: 2px; background: var(--accent); pointer-events: none; }
 .playhead::before { content: ""; position: absolute; top: 0; left: -5px; border: 6px solid transparent; border-top-color: var(--accent); }
 
 /* ── 匯出遮罩、提示 ── */
-#exportOverlay { position: fixed; inset: 0; background: rgba(10, 8, 14, .8); display: grid; place-items: center; z-index: 20; padding: 16px; }
+#exportOverlay, #dlg { position: fixed; inset: 0; background: rgba(10, 8, 14, .8); display: grid; place-items: center; z-index: 20; padding: 16px; }
 .export-card { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 24px; max-width: 420px; display: flex; flex-direction: column; gap: 14px; }
 .export-card h2 { margin: 0; font-size: 18px; }
+.export-card h3 { margin: 0; font-size: 12px; font-weight: 500; color: var(--muted); letter-spacing: .08em; }
+#dlgCard { width: 100%; max-height: 100%; overflow-y: auto; gap: 10px; }
+#dlgCard .actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 6px; }
 .export-card p { margin: 0; color: var(--muted); }
 .progress { height: 8px; background: var(--bg); border-radius: 999px; overflow: hidden; }
 #exportBar { height: 100%; width: 0; background: var(--accent); }

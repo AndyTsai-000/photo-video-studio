@@ -1,14 +1,14 @@
 // 修圖模式
 const PV = $('#pv');
-const PHOTO_MAX = 2400;      // 匯入時長邊上限
-const PREVIEW_MAX = 1280;    // 畫面預覽用的長邊
+const PHOTO_MAX = 4096;      // 匯入時長邊上限
+const PREVIEW_MAX = 1600;    // 畫面預覽用的長邊
 const HIST_MAX = 12;
 
 const ADJ = [
-  ['brightness', '亮度', -100, 100], ['contrast', '對比', -100, 100], ['saturation', '飽和度', -100, 100],
+  ['brightness', '亮度', -100, 100], ['contrast', '對比', -100, 100], ['saturation', '飽和度', -100, 100], ['vibrance', '自然飽和', -100, 100],
   ['exposure', '曝光', -100, 100], ['temp', '色溫', -100, 100], ['tint', '色調', -100, 100],
   ['hue', '色相', -180, 180], ['highlights', '高光', -100, 100], ['shadows', '陰影', -100, 100],
-  ['fade', '褪色', 0, 100], ['sharpen', '銳利', 0, 100], ['blur', '柔焦', 0, 100],
+  ['fade', '褪色', 0, 100], ['clarity', '清晰度', -100, 100], ['sharpen', '銳利', 0, 100], ['blur', '柔焦', 0, 100],
   ['vignette', '暗角', 0, 100], ['grain', '顆粒', 0, 100]
 ];
 const PRESETS = [
@@ -23,7 +23,13 @@ const PRESETS = [
   ['drama', '戲劇', { contrast: .4, saturation: -.2, shadows: -.2, highlights: .1 }],
   ['vivid', '鮮豔', { saturation: .45, contrast: .15 }],
   ['sweet', '甜美', { tint: .18, brightness: .1, saturation: .1, fade: .12, temp: .08 }],
-  ['night', '夜景', { temp: -.2, contrast: .25, shadows: .2, saturation: .15 }]
+  ['night', '夜景', { temp: -.2, contrast: .25, shadows: .2, saturation: .15 }],
+  ['mocha', '摩卡', { sepia: .25, contrast: .1, saturation: -.15, temp: .1 }],
+  ['mint', '薄荷', { tint: -.2, temp: -.1, fade: .15, brightness: .05 }],
+  ['sunset', '夕陽', { temp: .3, tint: .15, saturation: .2, contrast: .1 }],
+  ['neon', '霓虹', { hue: -18, saturation: .4, contrast: .2, tint: .2, temp: -.2 }],
+  ['grey', '灰調', { saturation: -.4, fade: .35, contrast: -.05 }],
+  ['hdr', 'HDR', { shadows: .5, highlights: -.4, contrast: .2, saturation: .2 }]
 ];
 const FONTS = {
   hei: ['黑體', '"Noto Sans TC","Microsoft JhengHei","PingFang TC",sans-serif'],
@@ -63,7 +69,9 @@ function restore(s) {
 }
 function pushHistory() {
   P.hist.push(snapshot());
-  if (P.hist.length > HIST_MAX) P.hist.shift();
+  // 大圖每一步都很佔記憶體，保留的步數少一點
+  const cap = P.base.width * P.base.height > 9e6 ? 6 : HIST_MAX;
+  while (P.hist.length > cap) P.hist.shift();
   P.redo = [];
   syncHistButtons();
 }
@@ -80,8 +88,9 @@ function redo() {
   syncHistButtons();
 }
 function syncHistButtons() {
-  $('#undoBtn').disabled = !P.hist.length;
-  $('#redoBtn').disabled = !P.redo.length;
+  const v = MODE === 'video';
+  $('#undoBtn').disabled = v ? !VH.undo.length : !P.hist.length;
+  $('#redoBtn').disabled = v ? !VH.redo.length : !P.redo.length;
 }
 
 function setPhotoImage(src, isSample) {
@@ -158,6 +167,14 @@ function applyStage(d, st) {
     d[i] = a * R + b * G + c * B; d[i + 1] = e * R + f * G + g * B; d[i + 2] = p * R + q * G + r * B;
   }
 }
+function applyVibrance(d, v) {
+  // 只加強原本不鮮豔的顏色，膚色和已經很飽和的地方不會過頭
+  for (let i = 0; i < d.length; i += 4) {
+    const r = d[i], g = d[i + 1], b = d[i + 2];
+    const k = v * (1 - (Math.max(r, g, b) - Math.min(r, g, b)) / 255) * 1.2, gray = 0.299 * r + 0.587 * g + 0.114 * b;
+    d[i] = r + (r - gray) * k; d[i + 1] = g + (g - gray) * k; d[i + 2] = b + (b - gray) * k;
+  }
+}
 function presetStage(key, amt) {
   const def = PRESETS.find(p => p[0] === key);
   if (!def || key === 'none' || amt <= 0) return null;
@@ -232,28 +249,41 @@ function objFont(o) {
   return (o.bold ? '700 ' : '500 ') + o.size + 'px ' + FONTS[o.font][1];
 }
 function objBox(o) {
+  if (o.type === 'image') return { w: o.size, h: o.size * o.cv.height / o.cv.width };
   measureCtx.font = objFont(o);
   const lines = String(o.text).split('\n');
   let w = 0;
   for (const l of lines) w = Math.max(w, measureCtx.measureText(l || ' ').width);
   return { w: w + o.size * 0.3, h: lines.length * o.size * 1.25 + o.size * 0.1 };
 }
-function drawObject(ctx, o) {
+// s 是目前畫布的縮放比例：陰影不受座標變換影響，要自己乘
+function drawObject(ctx, o, s) {
   ctx.save();
   ctx.translate(o.x, o.y);
   ctx.rotate(o.rot * Math.PI / 180);
+  ctx.globalAlpha = o.alpha == null ? 1 : o.alpha;
+  if (o.type === 'image') {
+    const b = objBox(o);
+    ctx.imageSmoothingQuality = 'high';
+    ctx.drawImage(o.cv, -b.w / 2, -b.h / 2, b.w, b.h);
+    ctx.restore();
+    return;
+  }
   ctx.font = objFont(o);
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   const lines = String(o.text).split('\n'), lh = o.size * 1.25;
   lines.forEach((l, i) => {
     const y = (i - (lines.length - 1) / 2) * lh;
+    if (o.shadow) { ctx.shadowColor = 'rgba(0,0,0,.6)'; ctx.shadowBlur = o.size * 0.2 * s; ctx.shadowOffsetY = o.size * 0.07 * s; }
     if (o.type === 'text' && o.stroke) {
       ctx.lineJoin = 'round'; ctx.lineWidth = o.size * 0.14; ctx.strokeStyle = o.strokeColor;
       ctx.strokeText(l, 0, y);
+      ctx.shadowColor = 'transparent';
     }
     ctx.fillStyle = o.color || '#000000';
     ctx.fillText(l, 0, y);
+    ctx.shadowColor = 'transparent';
   });
   ctx.restore();
 }
@@ -276,7 +306,7 @@ function renderPhoto(target, maxSide, opts) {
   opts = opts || {};
   const ins = frameInsets(opts.final);
   const fullW = P.base.width + ins.l + ins.r, fullH = P.base.height + ins.t + ins.b;
-  const s = maxSide ? Math.min(1, maxSide / Math.max(fullW, fullH)) : 1;
+  const s = opts.scale || (maxSide ? Math.min(1, maxSide / Math.max(fullW, fullH)) : 1);
   const W = Math.max(1, Math.round(fullW * s)), H = Math.max(1, Math.round(fullH * s));
   if (target.width !== W || target.height !== H) { target.width = W; target.height = H; }
   const iw = Math.max(1, Math.round(P.base.width * s)), ih = Math.max(1, Math.round(P.base.height * s));
@@ -287,15 +317,17 @@ function renderPhoto(target, maxSide, opts) {
   if (!opts.raw) {
     beautyPass(wc);
     const st1 = presetStage(P.preset, P.presetAmt / 100), st2 = userStage();
-    const sharp = P.adj.sharpen / 100;
-    if (st1 || st2 || sharp) {
+    const sharp = P.adj.sharpen / 100, clar = P.adj.clarity / 100, vib = P.adj.vibrance / 100;
+    if (st1 || st2 || sharp || clar || vib) {
       const id = wx.getImageData(0, 0, iw, ih), d = id.data;
       if (st1) applyStage(d, st1);
       if (st2) applyStage(d, st2);
-      if (sharp) {
+      if (vib) applyVibrance(d, vib);
+      // 清晰度看大範圍的明暗落差，銳利看細小邊緣；做法相同，只差模糊半徑
+      for (const [k, radius] of [[clar * 0.7, Math.max(iw, ih) / 45], [sharp * 1.6, Math.max(0.7, Math.max(iw, ih) / 1000)]]) {
+        if (!k) continue;
         wx.putImageData(id, 0, 0);
-        const bd = blurCanvas(wc, Math.max(0.7, Math.max(iw, ih) / 1000)).getContext('2d').getImageData(0, 0, iw, ih).data;
-        const k = sharp * 1.6;
+        const bd = blurCanvas(wc, radius).getContext('2d').getImageData(0, 0, iw, ih).data;
         for (let i = 0; i < d.length; i += 4) {
           d[i] += (d[i] - bd[i]) * k; d[i + 1] += (d[i + 1] - bd[i + 1]) * k; d[i + 2] += (d[i + 2] - bd[i + 2]) * k;
         }
@@ -334,7 +366,7 @@ function renderPhoto(target, maxSide, opts) {
 
   ctx.save();
   ctx.translate(ix, iy); ctx.scale(s, s);
-  for (const o of P.objects) drawObject(ctx, o);
+  for (const o of P.objects) drawObject(ctx, o, s);
   if (!opts.final && P.sel) {
     const o = P.sel, b = objBox(o);
     ctx.translate(o.x, o.y); ctx.rotate(o.rot * Math.PI / 180);
@@ -381,6 +413,16 @@ function flip(horizontal) {
   const w = P.base.width, hh = P.base.height;
   if (horizontal) transformAll(w, hh, x => { x.translate(w, 0); x.scale(-1, 1); }, (px, py) => [w - px, py]);
   else transformAll(w, hh, x => { x.translate(0, hh); x.scale(1, -1); }, (px, py) => [px, hh - py]);
+}
+// 轉一個小角度並放大到剛好沒有空白角落
+function rotatedFill(src, deg) {
+  const w = src.width, hh = src.height, a = deg * Math.PI / 180;
+  const z = Math.cos(Math.abs(a)) + Math.max(w / hh, hh / w) * Math.sin(Math.abs(a));
+  const c = mk(w, hh), x = c.getContext('2d');
+  x.imageSmoothingQuality = 'high';
+  x.translate(w / 2, hh / 2); x.rotate(a); x.scale(z, z);
+  x.drawImage(src, -w / 2, -hh / 2);
+  return c;
 }
 function applyCrop() {
   const c = P.crop, w = P.base.width, hh = P.base.height;
@@ -575,10 +617,11 @@ function deleteSelected() {
   requestRender();
 }
 function objSliders(el, o) {
-  const m = Math.min(P.base.width, P.base.height);
-  slider(el, { label: '大小', min: 2, max: 60, value: Math.round(o.size / m * 100), onStart: pushHistory, onInput: v => { o.size = m * v / 100; requestRender(); } });
+  const m = Math.min(P.base.width, P.base.height), name = { text: '文字', sticker: '貼圖', image: '圖片' }[o.type];
+  slider(el, { label: '大小', min: 2, max: o.type === 'image' ? 150 : 60, value: Math.round(o.size / m * 100), onStart: pushHistory, onInput: v => { o.size = m * v / 100; requestRender(); } });
   slider(el, { label: '旋轉', min: -180, max: 180, value: Math.round(((o.rot + 180) % 360 + 360) % 360 - 180), def: 0, fmt: v => v + '°', onStart: pushHistory, onInput: v => { o.rot = v; requestRender(); } });
-  el.append(h('button', { class: 'btn danger wide', text: '刪除這個' + (o.type === 'text' ? '文字' : '貼圖'), onclick: deleteSelected }));
+  slider(el, { label: '不透明度', min: 10, max: 100, value: Math.round((o.alpha == null ? 1 : o.alpha) * 100), def: 100, fmt: v => v + '%', onStart: pushHistory, onInput: v => { o.alpha = v / 100; requestRender(); } });
+  el.append(h('button', { class: 'btn danger wide', text: '刪除這個' + name, onclick: deleteSelected }));
 }
 const PANELS = {
   adjust(el) {
@@ -630,6 +673,14 @@ const PANELS = {
       h('button', { class: 'btn', text: '向右轉', onclick: () => rotate90(true) }),
       h('button', { class: 'btn', text: '左右翻', onclick: () => flip(true) }),
       h('button', { class: 'btn', text: '上下翻', onclick: () => flip(false) })));
+    let from = null;
+    slider(el, {
+      label: '拉正（微調角度）', min: -30, max: 30, step: 0.5, value: 0, def: 0, fmt: v => v + '°',
+      onStart: () => { pushHistory(); from = { base: P.base, paint: P.paint }; },
+      onInput: v => { if (!from) return; P.base = rotatedFill(from.base, v); P.paint = rotatedFill(from.paint, v); requestRender(); },
+      onEnd: () => { from = null; showTool('crop'); }
+    });
+    el.append(h('p', { text: '地平線歪掉時用。放開滑桿就會套用，可以再拉一次繼續微調。' }));
   },
   text(el) {
     el.append(h('h2', { text: '文字' }));
@@ -655,7 +706,8 @@ const PANELS = {
     chips(el, Object.entries(FONTS).map(([k, v]) => [k, v[0]]), o.font, v => { pushHistory(); o.font = v; loadFontFor(o); requestRender(); });
     el.append(h('div', { class: 'chips' },
       h('button', { class: 'btn', 'aria-pressed': String(o.bold), text: '粗體', onclick: () => { pushHistory(); o.bold = !o.bold; loadFontFor(o); showTool('text'); requestRender(); } }),
-      h('button', { class: 'btn', 'aria-pressed': String(o.stroke), text: '描邊', onclick: () => { pushHistory(); o.stroke = !o.stroke; showTool('text'); requestRender(); } })));
+      h('button', { class: 'btn', 'aria-pressed': String(o.stroke), text: '描邊', onclick: () => { pushHistory(); o.stroke = !o.stroke; showTool('text'); requestRender(); } }),
+      h('button', { class: 'btn', 'aria-pressed': String(!!o.shadow), text: '陰影', onclick: () => { pushHistory(); o.shadow = !o.shadow; showTool('text'); requestRender(); } })));
     el.append(h('h3', { text: '文字顏色' }));
     swatches(el, ['#ffffff', '#1a1a1a', '#ff5d8f', '#ffd24a', '#62d2c6', '#6b8cff'], o.color, c => { o.color = c; requestRender(); });
     if (o.stroke) {
@@ -674,7 +726,18 @@ const PANELS = {
       }));
     }
     el.append(grid);
-    const o = P.sel && P.sel.type === 'sticker' ? P.sel : null;
+    el.append(h('button', {
+      class: 'btn wide', text: '加入自己的圖片（Logo、浮水印）',
+      onclick: async () => {
+        const [f] = await pickFiles($('#fileImg'));
+        if (!f) return;
+        try {
+          const cv = await fileToCanvas(f, 2000);
+          addObject({ type: 'image', cv, x: P.base.width / 2, y: P.base.height / 2, size: Math.min(P.base.width, P.base.height) * 0.35, rot: 0, alpha: 1 });
+        } catch (e) { toast('無法讀取 ' + f.name); }
+      }
+    }));
+    const o = P.sel && P.sel.type !== 'text' ? P.sel : null;
     if (o) { el.append(h('hr')); objSliders(el, o); }
     else el.append(h('p', { text: '點一個貼圖放到圖上，再拖到想要的位置。' }));
   },
@@ -718,9 +781,20 @@ function initPhoto() {
   setPhotoImage(makeSample(0, 1600, 1067), true);
 }
 
+// 匯出尺寸：EXP.photo.size 是 '0'（原始）、'x2'（放大兩倍）或指定的長邊像素
+function photoExportScale() {
+  const ins = frameInsets(true);
+  const L = Math.max(P.base.width + ins.l + ins.r, P.base.height + ins.t + ins.b), v = EXP.photo.size;
+  if (v === '0') return 1;
+  if (v === 'x2') return Math.min(2, 8192 / L);
+  return Math.min(+v, 8192) / L;
+}
+function photoExportSize() {
+  const ins = frameInsets(true), s = photoExportScale();
+  return [Math.round((P.base.width + ins.l + ins.r) * s), Math.round((P.base.height + ins.t + ins.b) * s)];
+}
 function exportPhoto() {
   const c = mk(4, 4);
-  renderPhoto(c, 0, { final: true });
-  const png = $('#exportOpt').value === 'png';
-  c.toBlob(b => saveFile('修圖作品.' + (png ? 'png' : 'jpg'), b), png ? 'image/png' : 'image/jpeg', 0.93);
+  renderPhoto(c, 0, { final: true, scale: photoExportScale() });
+  saveCanvas(c, '修圖作品', EXP.photo);
 }

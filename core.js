@@ -83,6 +83,16 @@ async function saveFile(filename, blob) {
   toast('已下載 ' + filename);
 }
 
+// 把畫布存成圖片檔；opt 是 { fmt: 'jpg'|'png'|'webp', q: 50..100 }
+function saveCanvas(c, name, opt) {
+  const mime = { jpg: 'image/jpeg', png: 'image/png', webp: 'image/webp' }[opt.fmt] || 'image/jpeg';
+  c.toBlob(b => {
+    if (!b) { toast('圖片太大，瀏覽器無法產生檔案，請選小一點的尺寸', 4000); return; }
+    const ext = b.type === 'image/jpeg' ? 'jpg' : b.type === 'image/webp' ? 'webp' : 'png';
+    saveFile(name + '.' + ext, b);
+  }, mime, opt.q / 100);
+}
+
 // 讀圖並縮到指定長邊以內，回傳 canvas
 async function fileToCanvas(file, maxSide) {
   let src;

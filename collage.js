@@ -71,7 +71,7 @@ function renderCollage(target, scale, final) {
 function drawCollage() {
   renderCollage(CV2, 0.5, false);
   fit(CV2);
-  const [w, hh] = collageSize();
+  const k = +EXP.collage.side / COLLAGE_SIDE, [w, hh] = collageSize().map(v => Math.round(v * k));
   $('#collageInfo').replaceChildren(
     C.isSample ? h('span', { class: 'tag', text: '範例圖' }) : '',
     C.imgs.length + ' 張圖　輸出 ' + w + ' × ' + hh + ' 像素' + (C.isSample ? '　按「加入圖片」換成你的照片' : '')
@@ -84,7 +84,7 @@ async function addCollageFiles(files) {
   if (C.isSample) { C.imgs = []; C.isSample = false; }
   for (const f of imgs) {
     if (C.imgs.length >= 9) { toast('一張拼圖最多放 9 張圖'); break; }
-    try { C.imgs.push({ cv: await fileToCanvas(f, 1600), ox: 0.5, oy: 0.5, zoom: 1 }); }
+    try { C.imgs.push({ cv: await fileToCanvas(f, 2400), ox: 0.5, oy: 0.5, zoom: 1 }); }
     catch (e) { toast('無法讀取 ' + f.name); }
   }
   C.layout = 0; C.sel = -1;
@@ -163,7 +163,7 @@ function collagePanel() {
         class: 'btn', text: '換一張圖', onclick: async () => {
           const [f] = await pickFiles($('#fileImg'));
           if (!f) return;
-          try { it.cv = await fileToCanvas(f, 1600); it.ox = it.oy = 0.5; it.zoom = 1; drawCollage(); } catch (e) { toast('無法讀取 ' + f.name); }
+          try { it.cv = await fileToCanvas(f, 2400); it.ox = it.oy = 0.5; it.zoom = 1; drawCollage(); } catch (e) { toast('無法讀取 ' + f.name); }
         }
       }),
       h('button', { class: 'btn danger', text: '移除', onclick: () => { C.imgs.splice(C.sel, 1); C.sel = -1; C.layout = 0; collagePanel(); drawCollage(); } })));
@@ -187,7 +187,6 @@ function initCollage() {
 function exportCollage() {
   if (!C.imgs.length) { toast('先加入圖片'); return; }
   const c = mk(4, 4);
-  renderCollage(c, 1, true);
-  const png = $('#exportOpt').value === 'png';
-  c.toBlob(b => saveFile('拼圖作品.' + (png ? 'png' : 'jpg'), b), png ? 'image/png' : 'image/jpeg', 0.93);
+  renderCollage(c, +EXP.collage.side / COLLAGE_SIDE, true);
+  saveCanvas(c, '拼圖作品', EXP.collage);
 }
