@@ -121,6 +121,7 @@ function setPhotoImage(src) {
   P.frame = { type: 'none', color: '#ffffff', color2: '#ff5d8f', size: 5 };
   P.crop = { x: 0, y: 0, w: 1, h: 1 };
   P.cut = null; P.mark = null; P.maskBrush = '';
+  P.link = null;   // 從剪輯送來的照片會在 setPhotoImage 之後再設定連結
   P.hsl = {}; P.hslBand = ''; P.hslPick = false; P.fx = { type: 'none', amt: 60 }; P.zoom = 1;   // hslBand 留空：開新照片時自動選佔最多的顏色
   P.hist = []; P.redo = [];
   syncHistButtons();
@@ -1427,11 +1428,16 @@ function initPhoto() {
   syncPhotoEmpty();
 }
 // 還沒開圖時顯示引導，藏起畫布
+// 這張照片是從剪輯送過來的時候，右上角顯示「更新回剪輯」
+function syncLinkBtn() {
+  $('#backToVideoBtn').hidden = !(MODE === 'photo' && P.base && P.link);
+}
 function syncPhotoEmpty() {
   const empty = !P.base;
   $('#photoEmpty').hidden = !empty;
   PV.parentElement.hidden = empty;
   $('#compareBtn').hidden = $('#zoomCtl').hidden = empty;
+  syncLinkBtn();
   // 還沒開圖時跟拼圖一樣：左邊工具和右邊面板都先收起來
   $('#photoTools').hidden = $('#photoPanel').hidden = empty;
   $('#photo').classList.toggle('is-empty', empty);

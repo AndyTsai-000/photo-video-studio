@@ -435,19 +435,24 @@ function splitAtPlayhead(quiet) {
   return true;
 }
 // 定格：把播放頭這一格變成一張 2 秒的靜止畫面插進去
+// 在播放頭插入一張靜止畫面（2 秒）：在片段中間就先切開再插，回傳新片段
+function insertStill(shot, name) {
+  const L0 = locate(Math.min(V.t, Math.max(0, totalDur() - 0.001)));
+  let idx;
+  if (splitAtPlayhead(true)) idx = V.clips.findIndex(c => c.id === V.sel);
+  else idx = L0.clip ? L0.idx + (L0.local > clipDur(L0.clip) / 2 ? 1 : 0) : V.clips.length;
+  const fr = newClip('image', shot, name, 2, thumbOf(shot, shot.width, shot.height));
+  V.clips.splice(idx, 0, fr);
+  V.sel = fr.id; V.selText = null;
+  return fr;
+}
 function addFreezeFrame() {
   if (!V.clips.length) { toast('先加入影片或圖片'); return; }
   pause();
   V.clean = true; V.res = 1080; setVideoSize();
   const shot = cloneCanvas(VC);
   V.clean = false; V.res = 720; setVideoSize();
-  const L0 = locate(Math.min(V.t, Math.max(0, totalDur() - 0.001)));
-  let idx;
-  if (splitAtPlayhead(true)) idx = V.clips.findIndex(c => c.id === V.sel);
-  else idx = L0.idx + (L0.local > clipDur(L0.clip) / 2 ? 1 : 0);
-  const fr = newClip('image', shot, '定格畫面', 2, thumbOf(shot, shot.width, shot.height));
-  V.clips.splice(idx, 0, fr);
-  V.sel = fr.id; V.selText = null;
+  const fr = insertStill(shot, '定格畫面');
   rebuildTL(); vPanel(); seek(clipStart(fr) + 0.05);
   vCommit();
   toast('已插入 2 秒定格畫面，長度可以在右邊調整');
@@ -617,6 +622,7 @@ function vPanel() {
     slider(el, { label: '放大', min: 100, max: 300, step: 5, value: Math.round(clip.zoom * 100), def: 100, fmt: v => v + '%', onInput: v => { clip.zoom = v / 100; drawFrame(); } });
     el.append(h('button', { class: 'btn wide', 'aria-pressed': String(clip.fade), text: '開頭結尾淡入淡出', onclick: () => { clip.fade = !clip.fade; vPanel(); drawFrame(); } }));
     el = root;
+    el.append(h('button', { class: 'btn wide', text: '把這個畫面送到「修圖」', onclick: () => { const L = locate(Math.min(V.t, Math.max(0, totalDur() - 0.001))); if (L.clip !== clip) seek(clipStart(clip) + 0.05); snapshotToPhoto(); } }));
     el.append(h('button', { class: 'btn ghost wide', text: '回到專案設定', onclick: () => { V.sel = null; rebuildTL(); vPanel(); } }));
     return;
   }
@@ -883,15 +889,58 @@ function videoBitrate() {
   const [w, hh] = videoDims(+EXP.video.res);
   return Math.min(80e6, Math.round(w * hh * +EXP.video.fps * V_BPP[EXP.video.br]));
 }
+// 把播放頭的畫面送到修圖，並記住是哪個片段，修完可以一鍵更新回來。
+// 圖片片段：送原圖過去（不含剪輯裡加的濾鏡和文字），修完直接換掉那張圖。
+// 影片片段：影片本身換不了，送那一格乾淨的畫面過去，修完插回成一張定格畫面。
 function snapshotToPhoto() {
   if (!V.clips.length) { toast('先加入影片或圖片'); return; }
   pause();
-  V.res = 1440; setVideoSize();
-  const shot = cloneCanvas(VC);
-  V.res = 720; setVideoSize();
+  const c = locate(Math.min(V.t, Math.max(0, totalDur() - 0.001))).clip;
+  let shot, link;
+  if (c.kind === 'image') {
+    shot = cloneCanvas(c.el);
+    link = { clip: c.id, kind: 'image', t: V.t, still: null };
+  } else {
+    V.clean = true; V.res = 1440; setVideoSize();
+    shot = cloneCanvas(VC);
+    V.clean = false; V.res = 720; setVideoSize();
+    link = { clip: c.id, kind: 'video', t: V.t, still: null };
+  }
   setPhotoImage(shot);
+  P.link = link;
   setMode('photo');
-  toast('已把畫面送到修圖');
+  toast(link.kind === 'image' ? '已把這張圖片送到修圖。修好後按右上角「更新回剪輯」，剪輯裡的這張圖就會換成修好的。'
+    : '已把這一格畫面送到修圖。修好後按右上角「更新回剪輯」，會在同一個位置插入修好的定格畫面。', 6500);
+}
+function updateVideoFromPhoto() {
+  const link = P.link;
+  if (!link || !P.base) return;
+  const out = mk(4, 4);
+  renderPhoto(out, 0, { final: true });
+  const thumb = thumbOf(out, out.width, out.height), src = V.clips.find(c => c.id === link.clip);
+  const still = link.still && V.clips.find(c => c.id === link.still);
+  let msg, at;
+  if (link.kind === 'image' && src) {
+    // 同一張圖被分割成好幾段時，一起換掉
+    const old = src.el;
+    for (const c of V.clips) if (c.el === old) { c.el = out; c.thumb = thumb; }
+    at = clipStart(src) + 0.05;
+    msg = '剪輯裡的這張圖片已經換成修好的版本';
+  } else if (still) {
+    still.el = out; still.thumb = thumb;
+    at = clipStart(still) + 0.05;
+    msg = '定格畫面已經更新成修好的版本';
+  } else {
+    V.t = clamp(link.t, 0, totalDur());
+    const fr = insertStill(out, '修圖後的畫面');
+    link.kind = 'video'; link.still = fr.id;
+    at = clipStart(fr) + 0.05;
+    msg = link.clip && !src ? '原本的片段已經不在了，修好的畫面插在播放頭的位置（2 秒，長度可調）' : '已在原本的位置插入修好的定格畫面（2 秒，長度可以在右邊調整）';
+  }
+  setMode('video');
+  rebuildTL(); vPanel(); seek(at);
+  vCommit();
+  toast(msg, 5000);
 }
 function exportSrt() {
   const rows = [];
@@ -918,8 +967,15 @@ const VH = { undo: [], redo: [], last: null, key: '' };
 function vState() {
   return { clips: V.clips.map(c => ({ ...c, cap: { ...c.cap } })), texts: V.texts.map(t => ({ ...t })), aspect: V.aspect };
 }
+// 每個素材（影片元素或圖片畫布）給一個編號，換圖時復原紀錄才分得出來
+const elIds = new WeakMap();
+let elSeq = 0;
+function elId(el) {
+  if (!elIds.has(el)) elIds.set(el, ++elSeq);
+  return elIds.get(el);
+}
 function vKey() {
-  return JSON.stringify([V.clips.map(c => [c.id, c.in, c.out, c.speed, c.vol, c.filter, c.b, c.c, c.s, c.fit, c.rot, c.flip, c.zoom, c.fade, c.trans, c.kb, c.vig, c.capOn, c.cap]), V.texts, V.aspect]);
+  return JSON.stringify([V.clips.map(c => [c.id, elId(c.el), c.in, c.out, c.speed, c.vol, c.filter, c.b, c.c, c.s, c.fit, c.rot, c.flip, c.zoom, c.fade, c.trans, c.kb, c.vig, c.capOn, c.cap]), V.texts, V.aspect]);
 }
 function vCommit() {
   const k = vKey();

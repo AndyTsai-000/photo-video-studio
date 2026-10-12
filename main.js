@@ -33,6 +33,7 @@ function setMode(mode) {
   $('#undoBtn').hidden = $('#redoBtn').hidden = mode === 'collage';
   $('#openBtn').textContent = OPEN_LABEL[mode] || '';
   syncHistButtons();
+  syncLinkBtn();
   refit();
 }
 function refit() {
@@ -146,6 +147,7 @@ function drawHomePreviews() {
 }
 $('#openBtn').addEventListener('click', () => openForMode());
 $('#exportBtn').addEventListener('click', openExportDialog);
+$('#backToVideoBtn').addEventListener('click', updateVideoFromPhoto);
 $('#undoBtn').addEventListener('click', () => (MODE === 'video' ? vUndo() : undo()));
 $('#redoBtn').addEventListener('click', () => (MODE === 'video' ? vRedo() : redo()));
 

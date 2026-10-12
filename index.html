@@ -18,6 +18,7 @@
       <button id="undoBtn" class="btn ghost" title="復原（Ctrl+Z）">復原</button>
       <button id="redoBtn" class="btn ghost" title="重做（Ctrl+Y）">重做</button>
       <button id="openBtn" class="btn">開啟圖片</button>
+      <button id="backToVideoBtn" class="btn link" title="把修好的照片更新回剪輯" hidden>更新回剪輯</button>
       <button id="exportBtn" class="btn primary">匯出</button>
     </div>
   </header>
@@ -173,7 +174,7 @@
 <script>
   // 每次改版把 VERSION 加一。只有在 GitHub Pages 才加版本參數，避免瀏覽器繼續用舊的程式檔
   (function () {
-    var VERSION = '23', bust = /github\.io$/.test(location.hostname) ? '?v=' + VERSION : '';
+    var VERSION = '24', bust = /github\.io$/.test(location.hostname) ? '?v=' + VERSION : '';
     if (bust) {
       var css = document.createElement('link');
       css.rel = 'stylesheet'; css.href = 'app.css' + bust;

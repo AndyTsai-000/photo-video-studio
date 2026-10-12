@@ -58,6 +58,7 @@ button, select, input, textarea { font: inherit; color: inherit; }
 .btn.ghost { background: none; }
 .btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); font-weight: 700; }
 .btn.danger { color: var(--danger); }
+.btn.link { background: var(--cool); border-color: var(--cool); color: var(--cool-ink); font-weight: 700; }
 .btn.small { padding: 3px 10px; font-size: 13px; }
 .btn.wide { width: 100%; }
 .btn[aria-pressed="true"] { background: var(--cool); border-color: var(--cool); color: var(--cool-ink); font-weight: 700; }
