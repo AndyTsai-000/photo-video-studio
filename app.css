@@ -44,7 +44,7 @@ button, select, input, textarea { font: inherit; color: inherit; }
 .brand span { color: var(--fg); font-weight: 400; margin-left: 2px; }
 .modes { display: flex; gap: 2px; padding: 3px; background: var(--bg); border-radius: 999px; }
 .modes button {
-  border: 0; background: none; padding: 5px 18px; border-radius: 999px; cursor: pointer; color: var(--muted); font-weight: 500;
+  border: 0; background: none; padding: 5px 18px; border-radius: 999px; cursor: pointer; color: var(--muted); font-weight: 500; white-space: nowrap;
 }
 .modes button[aria-selected="true"] { background: var(--accent); color: var(--accent-ink); font-weight: 700; }
 .bar-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-left: auto; align-items: center; }
@@ -296,17 +296,39 @@ input[type="color"] { width: 34px; height: 28px; padding: 0; border: 1px solid v
 
 /* ── 手機：畫布在上，工具橫排，設定在下 ── */
 @media (max-width: 760px) {
-  .bar { padding: 8px 16px; }
+  /* 頂部：第一列是名稱和動作按鈕，第二列是模式分頁（放不下時可以左右滑） */
+  .bar { padding: 6px 16px; gap: 6px 10px; }
   .brand { font-size: 18px; }
-  .bar-actions { margin-left: 0; width: 100%; }
-  #photo:not(.is-empty) { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 44%) auto minmax(0, 1fr); }
+  .bar-actions { margin-left: auto; width: auto; gap: 4px; justify-content: flex-end; }
+  .bar-actions .btn { padding: 5px 9px; font-size: 13px; }
+  .modes { order: 3; width: 100%; overflow-x: auto; scrollbar-width: none; }
+  .modes::-webkit-scrollbar { display: none; }
+  .modes button { flex: 1 0 auto; padding: 5px 12px; }
+
+  /* 各模式由上到下：畫面、（修圖的工具列）、收合把手、設定面板、（剪輯的時間軸） */
+  #photo:not(.is-empty) { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 44%) auto auto minmax(0, 1fr); }
   #photo .stage { grid-row: 1; }
   #photo .tools { grid-row: 2; flex-direction: row; border-right: 0; border-top: 1px solid var(--line); padding: 6px 16px; }
   #photo .tools button { padding: 6px 12px; flex: none; }
-  #collage:not(.is-empty), #avatar:not(.is-empty) { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 44%) minmax(0, 1fr); }
-  #video:not(.is-empty) { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 34%) minmax(0, 1fr) auto; }
-  .panel { border-left: 0; border-top: 1px solid var(--line); }
+  #photo .panel-toggle { grid-row: 3; }
+  #photo .panel { grid-row: 4; }
+  #collage:not(.is-empty), #avatar:not(.is-empty) { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 44%) auto minmax(0, 1fr); }
+  #collage .stage, #avatar .stage { grid-row: 1; }
+  #collage .panel-toggle { grid-row: 2; }
+  #collage .panel, #avatar .panel { grid-row: 3; }
+  #video:not(.is-empty) { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 32%) auto minmax(0, 1fr) auto; }
+  #video .stage { grid-row: 1; }
+  #video .panel-toggle { grid-row: 2; }
+  #video .panel { grid-row: 3; }
+  #video .timeline { grid-row: 4; }
+  .panel { border-left: 0; border-top: 0; }
   .zoom { display: none; }
+
+  /* 時間軸的按鈕排成一列 */
+  .tl-tools { gap: 4px; padding: 4px 16px; flex-wrap: nowrap; }
+  .tl-tools .btn.small { padding: 3px 7px; }
+  .tl-tools .spacer { min-width: 0; }
+  .time { font-size: 11px; white-space: nowrap; }
 }
 
 /* ── 收合右邊工具列的箭頭 ── */
@@ -325,12 +347,14 @@ input[type="color"] { width: 34px; height: 28px; padding: 0; border: 1px solid v
 #photo.panel-off { grid-template-columns: 92px minmax(0, 1fr); }
 #collage.panel-off, #video.panel-off { grid-template-columns: minmax(0, 1fr); }
 @media (max-width: 760px) {
-  /* 手機上工具列在下方，箭頭固定在右上角 */
-  .panel-toggle { top: 8px; right: 8px; transform: none; width: 44px; height: 30px; border: 1px solid var(--line); border-radius: 999px; }
-  .panel-off .panel-toggle { right: 8px; }
+  /* 手機上面板在畫面下方：收合把手是兩者之間的一條橫桿，點一下收起或展開 */
+  .panel-toggle, .panel-off .panel-toggle {
+    position: static; transform: none; width: 100%; height: 30px; border: 0; border-top: 1px solid var(--line); border-radius: 0; background: var(--surface);
+  }
   .panel-toggle::before { transform: translateY(-2px) rotate(45deg); }
   .panel-off .panel-toggle::before { transform: translateY(2px) rotate(-135deg); }
-  #photo.panel-off:not(.is-empty) { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) auto; }
-  #collage.panel-off:not(.is-empty) { grid-template-rows: minmax(0, 1fr); }
-  #video.panel-off:not(.is-empty) { grid-template-rows: minmax(0, 1fr) auto; }
+  #photo.panel-off:not(.is-empty) { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) auto auto; }
+  #collage.panel-off:not(.is-empty) { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) auto; }
+  #video.panel-off:not(.is-empty) { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) auto auto auto; }
+}
 }
