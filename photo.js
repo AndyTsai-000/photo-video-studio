@@ -121,7 +121,7 @@ function setPhotoImage(src) {
   P.frame = { type: 'none', color: '#ffffff', color2: '#ff5d8f', size: 5 };
   P.crop = { x: 0, y: 0, w: 1, h: 1 };
   P.cut = null; P.mark = null; P.maskBrush = '';
-  P.hsl = {}; P.fx = { type: 'none', amt: 60 }; P.zoom = 1;
+  P.hsl = {}; P.hslBand = ''; P.hslPick = false; P.fx = { type: 'none', amt: 60 }; P.zoom = 1;   // hslBand 留空：開新照片時自動選佔最多的顏色
   P.hist = []; P.redo = [];
   syncHistButtons();
   syncPhotoEmpty();
@@ -196,6 +196,40 @@ function applyVibrance(d, v) {
 // ── 選色：只調某一種顏色（例如只讓天空更藍、只把草地調綠）──
 const HSL_BANDS = [['red', '紅', 0, '#e5484d'], ['orange', '橙', 30, '#f08c2e'], ['yellow', '黃', 58, '#f2d13c'], ['green', '綠', 120, '#46a758'],
   ['cyan', '青', 180, '#34b8c4'], ['blue', '藍', 225, '#3e63dd'], ['purple', '紫', 275, '#8e4ec6'], ['pink', '粉', 320, '#e93d82']];
+// 把一個顏色歸到最接近的色系；太接近黑白灰（沒有明確色相）時回傳 null
+function hslBandOf(r, g, b) {
+  const mx = Math.max(r, g, b), mn = Math.min(r, g, b), df = mx - mn;
+  if (df < 28) return null;
+  let hue = mx === r ? ((g - b) / df) % 6 : mx === g ? (b - r) / df + 2 : (r - g) / df + 4;
+  hue *= 60; if (hue < 0) hue += 360;
+  let best = null, bestDist = 999;
+  for (const band of HSL_BANDS) {
+    let dist = Math.abs(hue - band[2]); if (dist > 180) dist = 360 - dist;
+    if (dist < bestDist) { bestDist = dist; best = band[0]; }
+  }
+  return best;
+}
+// 統計這張照片實際出現哪些色系：回傳 [{ key, name, share（佔畫面比例）, color（照片裡這個色系的平均色） }]，依比例由多到少
+const hslSeen = new WeakMap();
+function hslPresent() {
+  if (hslSeen.has(P.base)) return hslSeen.get(P.base);
+  const k = Math.min(1, 160 / Math.max(P.base.width, P.base.height));
+  const c = mk(P.base.width * k, P.base.height * k), x = c.getContext('2d');
+  x.drawImage(P.base, 0, 0, c.width, c.height);
+  const d = x.getImageData(0, 0, c.width, c.height).data, total = d.length / 4, acc = {};
+  for (let i = 0; i < d.length; i += 4) {
+    const key = hslBandOf(d[i], d[i + 1], d[i + 2]);
+    if (!key) continue;
+    const a = acc[key] || (acc[key] = { n: 0, r: 0, g: 0, b: 0 });
+    a.n++; a.r += d[i]; a.g += d[i + 1]; a.b += d[i + 2];
+  }
+  const list = HSL_BANDS.filter(b => acc[b[0]] && acc[b[0]].n / total >= 0.015).map(b => {
+    const a = acc[b[0]];
+    return { key: b[0], name: b[1], share: a.n / total, color: 'rgb(' + Math.round(a.r / a.n) + ',' + Math.round(a.g / a.n) + ',' + Math.round(a.b / a.n) + ')' };
+  }).sort((p, q) => q.share - p.share);
+  hslSeen.set(P.base, list);
+  return list;
+}
 function hslActive() {
   return HSL_BANDS.filter(b => { const v = P.hsl[b[0]]; return v && (v.h || v.s || v.l); });
 }
@@ -919,6 +953,16 @@ PV.addEventListener('pointerdown', e => {
   if (!P.base || P.tool === 'crop') return;
   const p = toBase(e), br = activeBrush();
   PV.setPointerCapture(e.pointerId);
+  if (P.tool === 'adjust' && P.hslPick) {
+    // 選色的吸管：點哪裡就選那個位置的色系
+    const x = clamp(Math.round(p.x), 0, P.base.width - 1), y = clamp(Math.round(p.y), 0, P.base.height - 1);
+    const d = P.base.getContext('2d').getImageData(x, y, 1, 1).data, key = hslBandOf(d[0], d[1], d[2]);
+    P.hslPick = false;
+    if (key) { P.hslBand = key; P.open.hsl = true; toast('已選「' + HSL_BANDS.find(b => b[0] === key)[1] + '色」，用下面的滑桿調整'); }
+    else toast('這個位置接近黑白灰，沒有顏色可以調。換一個顏色明顯的地方再點');
+    showTool('adjust');
+    return;
+  }
   if (br === 'retouch' && RT.fx === 'clone' && (RT.picking || !RT.src)) {
     // 仿製筆：這一下是在指定「從哪裡複製」
     RT.src = { x: p.x, y: p.y }; RT.picking = false;
@@ -1058,17 +1102,30 @@ const PANELS = {
       el.append(box);
     }
     {
-      const body = h('div', { class: 'group-body' }), band = P.hslBand;
+      const body = h('div', { class: 'group-body' });
+      // 只列出這張照片裡真的有的顏色（加上已經調過的），色塊用照片裡那個色系的平均色
+      const seen = hslPresent(), list = seen.slice();
+      for (const b of hslActive()) if (!list.some(it => it.key === b[0])) list.push({ key: b[0], name: b[1], share: 0, color: b[3] });
+      if (!list.some(it => it.key === P.hslBand) && list.length) P.hslBand = list[0].key;
+      const band = P.hslBand;
       const cur = () => P.hsl[P.hslBand] || (P.hsl[P.hslBand] = { h: 0, s: 0, l: 0 });
-      body.append(h('div', { class: 'inline' }, HSL_BANDS.map(b => h('button', {
-        class: 'swatch', style: 'background:' + b[3], 'aria-label': b[1] + '色', title: b[1] + '色', 'aria-pressed': String(b[0] === band),
-        onclick: () => { P.hslBand = b[0]; showTool('adjust'); }
-      }))));
-      const v = P.hsl[band] || { h: 0, s: 0, l: 0 }, name = HSL_BANDS.find(b => b[0] === band)[1];
-      for (const [key, label] of [['h', '色相'], ['s', '飽和度'], ['l', '明度']]) {
-        slider(body, { label: name + '色的' + label, min: -100, max: 100, value: v[key], def: 0, onStart: pushHistory, onInput: n => { cur()[key] = n; requestRender(); } });
+      if (!list.length) body.append(h('p', { text: '這張照片幾乎是黑白灰，沒有明顯的顏色可以單獨調整。' }));
+      else {
+        body.append(h('div', { class: 'inline' }, list.map(it => h('button', {
+          class: 'swatch big', style: 'background:' + it.color, 'aria-pressed': String(it.key === band),
+          'aria-label': it.name + '色', title: it.name + '色' + (it.share ? '，約佔畫面 ' + Math.max(1, Math.round(it.share * 100)) + '%' : ''),
+          onclick: () => { P.hslBand = it.key; showTool('adjust'); }
+        }))));
+        body.append(h('button', {
+          class: 'btn wide', 'aria-pressed': String(!!P.hslPick), text: P.hslPick ? '請在照片上點要調的顏色' : '在照片上點一下選顏色',
+          onclick: () => { P.hslPick = !P.hslPick; showTool('adjust'); }
+        }));
+        const v = P.hsl[band] || { h: 0, s: 0, l: 0 }, name = HSL_BANDS.find(b => b[0] === band)[1];
+        for (const [key, label] of [['h', '色相'], ['s', '飽和度'], ['l', '明度']]) {
+          slider(body, { label: name + '色的' + label, min: -100, max: 100, value: v[key], def: 0, onStart: pushHistory, onInput: n => { cur()[key] = n; requestRender(); } });
+        }
+        body.append(h('p', { text: '色塊是這張照片裡實際出現的顏色，越前面佔的面積越大。選一個再調它的色相、飽和度、明度，其他顏色不會變。' }));
       }
-      body.append(h('p', { text: '先點一個顏色，再調它的色相、飽和度、明度。例如選藍色加飽和度，天空會更藍，其他顏色不變。' }));
       const box = h('details', { class: 'group', open: P.open.hsl }, h('summary', { text: '選色（只調某一種顏色）' }), body);
       box.addEventListener('toggle', () => { P.open.hsl = box.open; });
       el.append(box);
@@ -1296,7 +1353,8 @@ function showTool(tool) {
   else el.append(h('h2', { text: PHOTO_TOOLS.find(t => t[0] === tool)[1] }), h('p', { text: '先開啟一張圖片，這裡才會出現可以調整的項目。' }));
   syncCropBox();
   $('#brushRing').hidden = true;
-  PV.style.cursor = activeBrush() ? 'crosshair' : 'default';
+  if (tool !== 'adjust') P.hslPick = false;
+  PV.style.cursor = activeBrush() || P.hslPick ? 'crosshair' : 'default';
   if (wasCrop !== (tool === 'crop')) requestRender();
 }
 function initPhoto() {
