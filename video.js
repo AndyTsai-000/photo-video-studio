@@ -270,6 +270,7 @@ function tick(now) {
   const nx = V.clips[L.idx + 1];
   if (nx && nx.trans && nx.trans !== 'none' && V.t >= L.start + clipDur(c)) { V.prevFrame = cloneCanvas(VC); V.prevFor = nx.id; }
   drawFrame(); updatePlayhead();
+  encodeFrame(false);
   requestAnimationFrame(tick);
 }
 function finishPlayback(total) {
@@ -277,6 +278,7 @@ function finishPlayback(total) {
   pause();
   drawFrame(); updatePlayhead();
   if (V.exporting && V.rec && V.rec.state !== 'inactive') V.rec.stop();
+  else if (V.exporting && V.enc) finishEncode();
 }
 function seek(t) {
   V.t = clamp(t, 0, totalDur());
@@ -663,40 +665,150 @@ function vPanel() {
   el.append(h('hr'), h('p', { text: '點時間軸上的片段可以修剪、變速、套濾鏡、加文字。按空白鍵播放或暫停。' }));
 }
 
-// ── 匯出：把畫布和聲音即時錄成影片檔 ──
-function exportVideo() {
-  if (V.exporting) return;
-  if (totalDur() <= 0) { toast('先加入影片或圖片'); return; }
-  if (!window.MediaRecorder || !VC.captureStream) { toast('這個瀏覽器不支援影片匯出，請改用 Chrome 或 Edge', 4000); return; }
-  pause();
-  const fps = +EXP.video.fps;
-  V.res = +EXP.video.res;
-  setVideoSize();
-  ensureAudio();
+// ── 匯出 ──
+// 優先用瀏覽器的影片編碼器直接編出「標準 MP4」（H.264 + AAC，檔頭在最前面）。
+// 這種檔案 LINE、手機相簿、各種播放器都認得。瀏覽器內建錄影（MediaRecorder）產生的是
+// 分段式 MP4 或 WebM，傳到 LINE 會被當成一般檔案，所以只在編碼器不能用時才退回去用它。
+const MUXER_URL = 'https://cdn.jsdelivr.net/npm/mp4-muxer@5.2.2/build/mp4-muxer.min.js';
+function loadMuxer() {
+  if (window.Mp4Muxer) return Promise.resolve();
+  return new Promise((res, rej) => {
+    const sc = document.createElement('script');
+    sc.src = MUXER_URL; sc.onload = res; sc.onerror = () => rej(new Error('muxer'));
+    document.head.append(sc);
+  });
+}
+async function makeMp4Encoder(w, hh, fps, bitrate) {
+  if (!window.VideoEncoder || !window.AudioEncoder || !window.VideoFrame || !window.AudioData || !V.audio) return null;
+  try { await loadMuxer(); } catch (e) { return null; }
+  // H.264 的 level 依畫面大小和格數挑最低夠用的，舊裝置比較播得動；不支援再往上試
+  const load = w * hh * fps, levels = ['64001F', '640028', '64002A', '640033'];
+  const start = load <= 1280 * 720 * 30 ? 0 : load <= 1920 * 1080 * 30 ? 1 : load <= 1920 * 1080 * 60 ? 2 : 3;
+  let vcfg = null;
+  for (const lv of levels.slice(start)) {
+    const cfg = { codec: 'avc1.' + lv, width: w, height: hh, bitrate, framerate: fps, avc: { format: 'avc' } };
+    try { if ((await VideoEncoder.isConfigSupported(cfg)).supported) { vcfg = cfg; break; } } catch (e) { /* 試下一個 */ }
+  }
+  const sr = V.audio.ac.sampleRate, acfg = { codec: 'mp4a.40.2', sampleRate: sr, numberOfChannels: 2, bitrate: 160000 };
+  let audioOk = false;
+  try { audioOk = (await AudioEncoder.isConfigSupported(acfg)).supported; } catch (e) { audioOk = false; }
+  if (!vcfg || !audioOk) return null;
+  const target = new Mp4Muxer.ArrayBufferTarget();
+  const muxer = new Mp4Muxer.Muxer({
+    target, fastStart: 'in-memory', firstTimestampBehavior: 'offset',
+    video: { codec: 'avc', width: w, height: hh, frameRate: fps },
+    audio: { codec: 'aac', numberOfChannels: 2, sampleRate: sr }
+  });
+  const E = { muxer, target, fps, sr, on: false, t0: 0, last: -1, lastKey: -1e9, samples: 0, error: null, tap: null, mute: null };
+  E.ve = new VideoEncoder({ output: (chunk, meta) => muxer.addVideoChunk(chunk, meta), error: e => { E.error = e; } });
+  E.ve.configure(vcfg);
+  E.ae = new AudioEncoder({ output: (chunk, meta) => muxer.addAudioChunk(chunk, meta), error: e => { E.error = e; } });
+  E.ae.configure(acfg);
+  // 從總音量節點分接出聲音資料餵給編碼器
+  const ac = V.audio.ac;
+  E.tap = ac.createScriptProcessor(4096, 2, 2);
+  E.mute = ac.createGain(); E.mute.gain.value = 0;
+  V.audio.master.connect(E.tap); E.tap.connect(E.mute); E.mute.connect(ac.destination);
+  E.tap.onaudioprocess = ev => {
+    if (!E.on || E.error) return;
+    const n = ev.inputBuffer.length, data = new Float32Array(n * 2);
+    data.set(ev.inputBuffer.getChannelData(0), 0);
+    data.set(ev.inputBuffer.numberOfChannels > 1 ? ev.inputBuffer.getChannelData(1) : ev.inputBuffer.getChannelData(0), n);
+    const ad = new AudioData({ format: 'f32-planar', sampleRate: sr, numberOfFrames: n, numberOfChannels: 2, timestamp: Math.round(E.samples / sr * 1e6), data });
+    E.samples += n;
+    try { E.ae.encode(ad); } catch (e) { E.error = e; }
+    ad.close();
+  };
+  return E;
+}
+// 播放迴圈每畫完一格就呼叫：照設定的格數把畫布送進編碼器
+function encodeFrame(force) {
+  const E = V.enc;
+  if (!E || !E.on || E.error) return;
+  const n = Math.floor((performance.now() - E.t0) / 1000 * E.fps);
+  if (n <= E.last && !force) return;
+  if (E.ve.encodeQueueSize > 12) return;   // 電腦編不過來時跳過這一格，不讓記憶體堆積
+  const idx = Math.max(n, E.last + 1);
+  E.last = idx;
+  const key = idx - E.lastKey >= E.fps * 2;
+  if (key) E.lastKey = idx;
+  const frame = new VideoFrame(VC, { timestamp: Math.round(idx * 1e6 / E.fps), duration: Math.round(1e6 / E.fps) });
+  try { E.ve.encode(frame, { keyFrame: key }); } catch (e) { E.error = e; }
+  frame.close();
+}
+function endExportUi() {
+  $('#exportOverlay').hidden = true;
+  $('#exportTitle').textContent = '正在匯出影片';
+  V.exporting = false; V.rec = null; V.enc = null; V.res = 720; setVideoSize();
+}
+function closeEncoder(E) {
+  E.on = false;
+  E.tap.onaudioprocess = null;
+  try { V.audio.master.disconnect(E.tap); E.tap.disconnect(); E.mute.disconnect(); } catch (e) { /* 已經拔掉了 */ }
+  try { if (E.ve.state !== 'closed') E.ve.close(); if (E.ae.state !== 'closed') E.ae.close(); } catch (e) { /* 略過 */ }
+}
+async function finishEncode() {
+  const E = V.enc;
+  if (!E) return;
+  encodeFrame(true);   // 補上最後一格
+  E.on = false;
+  $('#exportTitle').textContent = '正在完成檔案…';
+  try {
+    await E.ve.flush(); await E.ae.flush();
+    if (E.error) throw E.error;
+    E.muxer.finalize();
+    const blob = new Blob([E.target.buffer], { type: 'video/mp4' });
+    closeEncoder(E); endExportUi();
+    if (V.cancelled) { toast('已取消匯出'); return; }
+    saveFile('剪輯作品.mp4', blob);
+  } catch (e) {
+    if (V.cancelled) return;   // 收尾途中被取消，取消那邊已經處理好了
+    closeEncoder(E); endExportUi();
+    toast('匯出失敗：' + ((e && e.message) || '編碼器發生錯誤') + '。可以把解析度或格數調低再試一次。', 6000);
+  }
+}
+function exportWithRecorder(fps) {
+  if (!window.MediaRecorder || !VC.captureStream) { endExportUi(); toast('這個瀏覽器不支援影片匯出，請改用 Chrome 或 Edge', 4000); return; }
   const stream = VC.captureStream(fps);
   if (V.audio) V.audio.dest.stream.getAudioTracks().forEach(t => stream.addTrack(t));
   const mime = ['video/mp4;codecs=avc1.42E01E,mp4a.40.2', 'video/mp4', 'video/webm;codecs=vp9,opus', 'video/webm;codecs=vp8,opus', 'video/webm']
     .find(m => MediaRecorder.isTypeSupported(m));
   let rec;
   try { rec = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: videoBitrate() }); }
-  catch (e) { toast('無法開始錄製：' + e.message, 4000); return; }
+  catch (e) { endExportUi(); toast('無法開始錄製：' + e.message, 4000); return; }
   const chunks = [], ext = mime && mime.startsWith('video/mp4') ? 'mp4' : 'webm';
   rec.ondataavailable = e => { if (e.data && e.data.size) chunks.push(e.data); };
   rec.onstop = () => {
     stream.getVideoTracks().forEach(t => t.stop());
-    $('#exportOverlay').hidden = true;
-    V.exporting = false; V.rec = null; V.res = 720; setVideoSize();
-    if (V.cancelled) { toast('已取消匯出'); return; }
+    const cancelled = V.cancelled;
+    endExportUi();
+    if (cancelled) { toast('已取消匯出'); return; }
     saveFile('剪輯作品.' + ext, new Blob(chunks, { type: 'video/' + ext }));
+    toast('這個瀏覽器只能匯出相容性較差的格式，傳到 LINE 可能會變成檔案。建議改用電腦版 Chrome 或 Edge 匯出。', 7000);
   };
-  V.exporting = true; V.cancelled = false; V.rec = rec;
+  V.rec = rec;
+  setTimeout(() => { if (V.exporting && V.rec === rec) { rec.start(1000); play(); } }, 500);
+}
+async function exportVideo() {
+  if (V.exporting) return;
+  if (totalDur() <= 0) { toast('先加入影片或圖片'); return; }
+  pause();
+  const fps = +EXP.video.fps;
+  V.res = +EXP.video.res;
+  setVideoSize();
+  ensureAudio();
+  V.exporting = true; V.cancelled = false; V.rec = null; V.enc = null;
   $('#exportBar').style.width = '0%';
   $('#exportOverlay').hidden = false;
   seek(0);
-  // 等第一格畫面就緒再開始錄
+  const E = await makeMp4Encoder(VC.width, VC.height, fps, videoBitrate());
+  if (!V.exporting) { if (E) closeEncoder(E); return; }   // 準備期間被取消了
+  if (!E) { exportWithRecorder(fps); return; }
+  V.enc = E;
+  // 等第一格畫面就緒再開始
   setTimeout(() => {
-    if (!V.exporting) return;
-    rec.start(1000);
+    if (!V.exporting || V.enc !== E) return;
+    E.t0 = performance.now(); E.on = true;
     play();
   }, 500);
 }
@@ -704,9 +816,12 @@ $('#cancelExport').addEventListener('click', () => {
   V.cancelled = true;
   pause();
   if (V.rec && V.rec.state !== 'inactive') V.rec.stop();
-  else { V.exporting = false; V.rec = null; V.res = 720; setVideoSize(); $('#exportOverlay').hidden = true; }
+  else {
+    if (V.enc) closeEncoder(V.enc);
+    endExportUi();
+    toast('已取消匯出');
+  }
 });
-
 const V_BPP = { std: 0.07, high: 0.12, max: 0.2 };
 function videoBitrate() {
   const [w, hh] = videoDims(+EXP.video.res);
