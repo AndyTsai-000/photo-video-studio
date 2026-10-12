@@ -86,6 +86,7 @@ select {
 .mode { flex: 1; min-height: 0; display: grid; }
 #photo { grid-template-columns: 76px minmax(0, 1fr) 300px; }
 #collage { grid-template-columns: minmax(0, 1fr) 300px; }
+#collage.is-empty { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); }
 #video { grid-template-columns: minmax(0, 1fr) 300px; grid-template-rows: minmax(0, 1fr) auto; }
 #video .timeline { grid-column: 1 / -1; }
 
@@ -238,7 +239,7 @@ input[type="color"] { width: 34px; height: 28px; padding: 0; border: 1px solid v
   #photo .stage { grid-row: 1; }
   #photo .tools { grid-row: 2; flex-direction: row; border-right: 0; border-top: 1px solid var(--line); padding: 6px 16px; }
   #photo .tools button { padding: 6px 12px; flex: none; }
-  #collage { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 44%) minmax(0, 1fr); }
+  #collage:not(.is-empty) { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 44%) minmax(0, 1fr); }
   #video { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 34%) minmax(0, 1fr) auto; }
   .panel { border-left: 0; border-top: 1px solid var(--line); }
   .zoom { display: none; }

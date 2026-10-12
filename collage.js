@@ -105,6 +105,9 @@ function drawCollage() {
   const empty = !C.imgs.length;
   $('#collageEmpty').hidden = !empty;
   CV2.parentElement.hidden = empty;
+  // 沒有照片時右邊的設定面板也先收起來，加入照片後才出現
+  $('#collagePanel').hidden = empty;
+  $('#collage').classList.toggle('is-empty', empty);
   renderCollage(CV2, 0.5, false);
   fit(CV2);
   const k = +EXP.collage.side / COLLAGE_SIDE, [w, hh] = collageSize().map(v => Math.round(v * k));
