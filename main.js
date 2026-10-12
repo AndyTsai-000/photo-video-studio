@@ -110,8 +110,11 @@ function drawHomePreviews() {
     c.getContext('2d').drawImage(src, (c.width - src.width * s) / 2, (c.height - src.height * s) / 2, src.width * s, src.height * s);
   };
   cover('#homePhoto', makeSample(0, 480, 300));
-  const col = mk(4, 4);
+  // 首頁的拼圖示意圖：暫時放四張範例圖畫一次，不留在拼圖裡
+  const col = mk(4, 4), keep = C.imgs;
+  C.imgs = [0, 1, 2, 3].map(i => ({ cv: makeSample(i, 300, 300), ox: 0.5, oy: 0.5, zoom: 1 }));
   renderCollage(col, 0.2, true);
+  C.imgs = keep;
   cover('#homeCollage', col);
   cover('#homeVideo', makeSample(2, 480, 300));
 }

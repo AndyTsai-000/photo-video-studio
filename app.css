@@ -101,6 +101,8 @@ select {
 
 .stage { display: grid; grid-template-rows: minmax(0, 1fr) auto; min-width: 0; min-height: 0; }
 .fitbox { display: grid; place-items: center; min-width: 0; min-height: 0; overflow: hidden; }
+.empty { display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 24px 16px; text-align: center; color: var(--muted); }
+.empty strong { font-size: 20px; color: var(--fg); }
 .canvas-wrap { position: relative; box-shadow: 0 8px 30px rgba(0, 0, 0, .45); }
 .canvas-wrap canvas { display: block; width: 100%; height: 100%; touch-action: none; }
 .stage-foot {

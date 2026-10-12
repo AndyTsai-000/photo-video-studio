@@ -80,6 +80,11 @@
     <div class="stage">
       <div class="fitbox">
         <div class="canvas-wrap"><canvas id="vc"></canvas></div>
+        <div class="empty" id="videoEmpty" hidden>
+          <strong>還沒有素材</strong>
+          <span>加入影片或圖片就能開始剪輯，也可以直接把檔案拖進來。</span>
+          <button class="btn primary" id="videoEmptyBtn">加入影片或圖片</button>
+        </div>
       </div>
     </div>
     <aside class="panel" id="videoPanel"></aside>
@@ -132,7 +137,7 @@
 <script>
   // 每次改版把 VERSION 加一。只有在 GitHub Pages 才加版本參數，避免瀏覽器繼續用舊的程式檔
   (function () {
-    var VERSION = '6', bust = /github\.io$/.test(location.hostname) ? '?v=' + VERSION : '';
+    var VERSION = '7', bust = /github\.io$/.test(location.hostname) ? '?v=' + VERSION : '';
     if (bust) {
       var css = document.createElement('link');
       css.rel = 'stylesheet'; css.href = 'app.css' + bust;

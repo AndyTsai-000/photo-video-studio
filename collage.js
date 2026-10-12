@@ -2,7 +2,7 @@
 const CV2 = $('#cv2');
 const COLLAGE_SIDE = 2400;
 const C = {
-  imgs: [], count: 4, layout: 0, gap: 2, radius: 2, bg: '#ffffff', ratio: '1:1', sel: -1, isSample: true
+  imgs: [], count: 4, layout: 0, gap: 2, radius: 2, bg: '#ffffff', ratio: '1:1', sel: -1
 };
 const RATIOS = { '1:1': [1, 1], '3:4': [3, 4], '4:3': [4, 3], '9:16': [9, 16], '16:9': [16, 9] };
 
@@ -87,16 +87,13 @@ function drawCollage() {
   renderCollage(CV2, 0.5, false);
   fit(CV2);
   const k = +EXP.collage.side / COLLAGE_SIDE, [w, hh] = collageSize().map(v => Math.round(v * k));
-  $('#collageInfo').replaceChildren(
-    C.isSample ? h('span', { class: 'tag', text: '範例圖' }) : '',
-    Math.min(C.imgs.length, C.count) + ' / ' + C.count + ' 格已放圖　輸出 ' + w + ' × ' + hh + ' 像素' + (C.isSample ? '　按「加入圖片」換成你的照片' : '')
-  );
+  $('#collageInfo').textContent = Math.min(C.imgs.length, C.count) + ' / ' + C.count + ' 格已放圖　輸出 ' + w + ' × ' + hh + ' 像素'
+    + (C.imgs.length ? '' : '　點有加號的格子放照片，或直接把照片拖進來');
 }
 
 async function addCollageFiles(files) {
   const imgs = files.filter(f => f.type.startsWith('image/'));
   if (!imgs.length) return;
-  if (C.isSample) { C.imgs = []; C.isSample = false; }
   const before = C.imgs.length;
   for (const f of imgs) {
     if (C.imgs.length >= 9) { toast('一張拼圖最多放 9 張圖'); break; }
@@ -105,8 +102,8 @@ async function addCollageFiles(files) {
   }
   // 照片比格子多時，自動換成格數夠的版型
   if (C.imgs.length > C.count) { C.count = Math.min(9, C.imgs.length); C.layout = 0; }
-  // 第一次放照片（原本是範例或空的）：直接用跟照片張數一樣的版型
-  else if (!before && C.imgs.length) { C.count = clamp(C.imgs.length, 2, 9); C.layout = 0; }
+  // 一次放進多張照片到空的拼圖：直接用跟照片張數一樣的版型
+  else if (!before && C.imgs.length > 1) { C.count = clamp(C.imgs.length, 2, 9); C.layout = 0; }
   C.sel = -1;
   collagePanel(); drawCollage();
 }
@@ -204,7 +201,6 @@ function collagePanel() {
   }));
 }
 function initCollage() {
-  for (let i = 0; i < 4; i++) C.imgs.push({ cv: makeSample(i, 900, 900), ox: 0.5, oy: 0.5, zoom: 1 });
   collagePanel();
 }
 function exportCollage() {

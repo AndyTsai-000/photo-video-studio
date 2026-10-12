@@ -5,7 +5,7 @@ const V = {
   clips: [], texts: [], music: null,
   t: 0, playing: false, active: null, lastTs: 0,
   sel: null, selText: null, aspect: '16:9', res: 720, pps: 50,
-  isSample: true, exporting: false, rec: null, cancelled: false, audio: null
+  exporting: false, rec: null, cancelled: false, audio: null
 };
 const V_ASPECTS = { '16:9': [16, 9], '9:16': [9, 16], '1:1': [1, 1], '4:5': [4, 5] };
 const V_FILTERS = [
@@ -296,8 +296,6 @@ async function addMedia(files) {
   if (!files.length) return;
   pause();
   for (const f of files) {
-    const isMedia = f.type.startsWith('video/') || f.type.startsWith('image/');
-    if (isMedia && V.isSample) { V.clips = []; V.texts = []; V.isSample = false; V.t = 0; V.sel = V.selText = null; }
     try {
       if (f.type.startsWith('video/')) await addVideoFile(f);
       else if (f.type.startsWith('image/')) {
@@ -313,7 +311,10 @@ async function addMedia(files) {
 
 // ── 時間軸 ──
 function rebuildTL() {
-  const total = totalDur(), pps = V.pps;
+  const total = totalDur(), pps = V.pps, empty = !V.clips.length;
+  $('#videoEmpty').hidden = !empty;
+  VC.parentElement.hidden = empty;
+  if (!empty) fit(VC);
   $('#tlInner').style.width = Math.max(total * pps + 120, 0) + 'px';
   const ruler = $('#tlRuler');
   ruler.replaceChildren();
@@ -512,7 +513,6 @@ function vPanel() {
   }
 
   el.append(h('h2', { text: '剪輯專案' }));
-  if (V.isSample) el.append(h('p', {}, h('span', { class: 'tag', text: '範例片段' }), '加入你的素材後，範例會自動換掉。'));
   el.append(h('button', { class: 'btn primary wide', text: '加入影片或圖片', onclick: async () => addMedia(await pickFiles($('#fileMedia'))) }));
   el.append(h('button', {
     class: 'btn wide', text: '在播放頭的片段加一段文字', onclick: () => {
@@ -641,7 +641,7 @@ function exportSrt() {
 // ── 復原／重做：每次操作結束時比對狀態，有變才記一步 ──
 const VH = { undo: [], redo: [], last: null, key: '' };
 function vState() {
-  return { clips: V.clips.map(c => ({ ...c, cap: { ...c.cap } })), texts: V.texts.map(t => ({ ...t })), aspect: V.aspect, isSample: V.isSample };
+  return { clips: V.clips.map(c => ({ ...c, cap: { ...c.cap } })), texts: V.texts.map(t => ({ ...t })), aspect: V.aspect };
 }
 function vKey() {
   return JSON.stringify([V.clips.map(c => [c.id, c.in, c.out, c.speed, c.vol, c.filter, c.b, c.c, c.s, c.fit, c.rot, c.flip, c.zoom, c.fade, c.capOn, c.cap]), V.texts, V.aspect]);
@@ -656,7 +656,7 @@ function vCommit() {
 function vRestore(st) {
   pause();
   V.clips = st.clips.map(c => ({ ...c, cap: { ...c.cap } })); V.texts = st.texts.map(t => ({ ...t }));
-  V.aspect = st.aspect; V.isSample = st.isSample; V.sel = V.selText = null;
+  V.aspect = st.aspect; V.sel = V.selText = null;
   VH.last = vState(); VH.key = vKey();
   setVideoSize(); rebuildTL(); vPanel(); seek(Math.min(V.t, totalDur()));
   syncHistButtons();
@@ -665,13 +665,7 @@ function vUndo() { if (VH.undo.length) { VH.redo.push(VH.last); vRestore(VH.undo
 function vRedo() { if (VH.redo.length) { VH.undo.push(VH.last); vRestore(VH.redo.pop()); } }
 
 function initVideo() {
-  for (let i = 0; i < 3; i++) {
-    const cv = makeSample(i + 1, 1280, 720);
-    const c = newClip('image', cv, '範例片段 ' + (i + 1), 3, thumbOf(cv, cv.width, cv.height));
-    c.fade = i > 0;
-    V.clips.push(c);
-  }
-  V.texts.push({ id: ++vid, clip: V.clips[0].id, at: 0.3, dur: 2.5, text: '我的旅行日記', pos: 'bottom', size: 8, color: '#ffffff' });
+  $('#videoEmptyBtn').addEventListener('click', async () => addMedia(await pickFiles($('#fileMedia'))));
   setVideoSize();
   rebuildTL(); vPanel();
   vCommit();
