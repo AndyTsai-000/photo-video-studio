@@ -1,0 +1,106 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>光影工作室</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=LXGW+WenKai+TC:wght@400;700&family=Noto+Sans+TC:wght@400;500;700&family=Noto+Serif+TC:wght@500;700&display=swap">
+<link rel="stylesheet" href="app.css">
+
+<div id="app" data-mode="photo">
+  <header class="bar">
+    <div class="brand">光影<span>工作室</span></div>
+    <nav class="modes" role="tablist" aria-label="工作模式">
+      <button role="tab" data-mode="photo" aria-selected="true">修圖</button>
+      <button role="tab" data-mode="collage" aria-selected="false">拼圖</button>
+      <button role="tab" data-mode="video" aria-selected="false">剪輯</button>
+    </nav>
+    <div class="bar-actions">
+      <button id="undoBtn" class="btn ghost" title="復原（Ctrl+Z）">復原</button>
+      <button id="redoBtn" class="btn ghost" title="重做（Ctrl+Y）">重做</button>
+      <button id="openBtn" class="btn">開啟圖片</button>
+      <select id="exportOpt" aria-label="匯出格式"></select>
+      <button id="exportBtn" class="btn primary">匯出</button>
+    </div>
+  </header>
+
+  <section class="mode" id="photo">
+    <nav class="tools" id="photoTools" aria-label="修圖工具"></nav>
+    <div class="stage">
+      <div class="fitbox">
+        <div class="canvas-wrap">
+          <canvas id="pv"></canvas>
+          <div id="cropBox" hidden>
+            <i data-h="nw"></i><i data-h="ne"></i><i data-h="sw"></i><i data-h="se"></i>
+          </div>
+          <div id="brushRing" hidden></div>
+        </div>
+      </div>
+      <div class="stage-foot">
+        <span id="photoInfo"></span>
+        <button id="compareBtn" class="btn ghost small">按住看原圖</button>
+      </div>
+    </div>
+    <aside class="panel" id="photoPanel"></aside>
+  </section>
+
+  <section class="mode" id="collage" hidden>
+    <div class="stage">
+      <div class="fitbox">
+        <div class="canvas-wrap"><canvas id="cv2"></canvas></div>
+      </div>
+      <div class="stage-foot"><span id="collageInfo"></span></div>
+    </div>
+    <aside class="panel" id="collagePanel"></aside>
+  </section>
+
+  <section class="mode" id="video" hidden>
+    <div class="stage">
+      <div class="fitbox">
+        <div class="canvas-wrap"><canvas id="vc"></canvas></div>
+      </div>
+    </div>
+    <aside class="panel" id="videoPanel"></aside>
+    <div class="timeline">
+      <div class="tl-tools">
+        <button id="playBtn" class="btn primary small">播放</button>
+        <span id="timeLabel" class="time">0:00.0 / 0:00.0</span>
+        <span class="spacer"></span>
+        <button id="splitBtn" class="btn small" title="在播放頭的位置把片段切成兩段">分割</button>
+        <button id="dupBtn" class="btn small">複製</button>
+        <button id="leftBtn" class="btn small" title="往前移">←</button>
+        <button id="rightBtn" class="btn small" title="往後移">→</button>
+        <button id="delBtn" class="btn small danger">刪除</button>
+        <label class="zoom" for="zoomRange">縮放<input type="range" id="zoomRange" min="10" max="160" value="50"></label>
+      </div>
+      <div class="tl-scroll" id="tlScroll">
+        <div class="tl-inner" id="tlInner">
+          <div class="ruler" id="tlRuler"></div>
+          <div class="track t-text" id="tlTexts"></div>
+          <div class="track t-clips" id="tlClips"></div>
+          <div class="track t-music" id="tlMusic"></div>
+          <div class="playhead" id="playhead"></div>
+        </div>
+      </div>
+    </div>
+  </section>
+</div>
+
+<div id="exportOverlay" hidden>
+  <div class="export-card">
+    <h2>正在匯出影片</h2>
+    <p>影片會照實際速度錄一次，長度多久就需要多久。匯出期間請讓這個分頁留在最前面。</p>
+    <div class="progress"><div id="exportBar"></div></div>
+    <button id="cancelExport" class="btn">取消匯出</button>
+  </div>
+</div>
+<div id="toast" role="status" aria-live="polite" hidden></div>
+
+<input type="file" id="fileImg" accept="image/*" hidden>
+<input type="file" id="fileImgs" accept="image/*" multiple hidden>
+<input type="file" id="fileMedia" accept="video/*,image/*,audio/*" multiple hidden>
+<input type="file" id="fileAudio" accept="audio/*" hidden>
+
+<script src="core.js"></script>
+<script src="photo.js"></script>
+<script src="collage.js"></script>
+<script src="video.js"></script>
+<script src="main.js"></script>
