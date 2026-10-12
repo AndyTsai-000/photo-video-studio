@@ -2,7 +2,7 @@
 const CV2 = $('#cv2');
 const COLLAGE_SIDE = 2400;
 const C = {
-  imgs: [], layout: 0, gap: 2, radius: 2, bg: '#ffffff', ratio: '1:1', sel: -1, isSample: true
+  imgs: [], count: 4, layout: 0, gap: 2, radius: 2, bg: '#ffffff', ratio: '1:1', sel: -1, isSample: true
 };
 const RATIOS = { '1:1': [1, 1], '3:4': [3, 4], '4:3': [4, 3], '9:16': [9, 16], '16:9': [16, 9] };
 
@@ -27,7 +27,7 @@ const LAYOUTS = {
   9: [rowsLayout([3, 3, 3]), rowsLayout([2, 3, 4]), colsLayout([2, 3, 4])]
 };
 function currentLayout() {
-  const list = LAYOUTS[clamp(C.imgs.length, 1, 9)];
+  const list = LAYOUTS[C.count];
   return list[C.layout % list.length];
 }
 function collageSize() {
@@ -53,7 +53,22 @@ function renderCollage(target, scale, final) {
   const rects = cellRects(W, H), rad = Math.min(W, H) * C.radius / 100;
   rects.forEach((r, i) => {
     const it = C.imgs[i];
-    if (!it || r.w <= 0 || r.h <= 0) return;
+    if (r.w <= 0 || r.h <= 0) return;
+    if (!it) {
+      // 還沒放照片的格子：預覽時畫一個加號提示，匯出時留空
+      if (final) return;
+      ctx.save();
+      roundRectPath(ctx, r.x, r.y, r.w, r.h, rad);
+      ctx.fillStyle = 'rgba(128,120,140,.28)'; ctx.fill();
+      const p = Math.min(r.w, r.h) * 0.12;
+      ctx.strokeStyle = 'rgba(128,120,140,.9)'; ctx.lineWidth = Math.max(2, p * 0.18); ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(r.x + r.w / 2 - p, r.y + r.h / 2); ctx.lineTo(r.x + r.w / 2 + p, r.y + r.h / 2);
+      ctx.moveTo(r.x + r.w / 2, r.y + r.h / 2 - p); ctx.lineTo(r.x + r.w / 2, r.y + r.h / 2 + p);
+      ctx.stroke();
+      ctx.restore();
+      return;
+    }
     const [dw, dh] = drawnSize(it, r);
     ctx.save();
     roundRectPath(ctx, r.x, r.y, r.w, r.h, rad); ctx.clip();
@@ -74,7 +89,7 @@ function drawCollage() {
   const k = +EXP.collage.side / COLLAGE_SIDE, [w, hh] = collageSize().map(v => Math.round(v * k));
   $('#collageInfo').replaceChildren(
     C.isSample ? h('span', { class: 'tag', text: '範例圖' }) : '',
-    C.imgs.length + ' 張圖　輸出 ' + w + ' × ' + hh + ' 像素' + (C.isSample ? '　按「加入圖片」換成你的照片' : '')
+    Math.min(C.imgs.length, C.count) + ' / ' + C.count + ' 格已放圖　輸出 ' + w + ' × ' + hh + ' 像素' + (C.isSample ? '　按「加入圖片」換成你的照片' : '')
   );
 }
 
@@ -82,12 +97,17 @@ async function addCollageFiles(files) {
   const imgs = files.filter(f => f.type.startsWith('image/'));
   if (!imgs.length) return;
   if (C.isSample) { C.imgs = []; C.isSample = false; }
+  const before = C.imgs.length;
   for (const f of imgs) {
     if (C.imgs.length >= 9) { toast('一張拼圖最多放 9 張圖'); break; }
     try { C.imgs.push({ cv: await fileToCanvas(f, 2400), ox: 0.5, oy: 0.5, zoom: 1 }); }
     catch (e) { toast('無法讀取 ' + f.name); }
   }
-  C.layout = 0; C.sel = -1;
+  // 照片比格子多時，自動換成格數夠的版型
+  if (C.imgs.length > C.count) { C.count = Math.min(9, C.imgs.length); C.layout = 0; }
+  // 第一次放照片（原本是範例或空的）：直接用跟照片張數一樣的版型
+  else if (!before && C.imgs.length) { C.count = clamp(C.imgs.length, 2, 9); C.layout = 0; }
+  C.sel = -1;
   collagePanel(); drawCollage();
 }
 
@@ -97,11 +117,12 @@ function cellAt(e) {
   const x = (e.clientX - r.left) * k, y = (e.clientY - r.top) * k;
   const rects = cellRects(CV2.width, CV2.height);
   const i = rects.findIndex(c => x >= c.x && x <= c.x + c.w && y >= c.y && y <= c.y + c.h);
-  return { i: i < C.imgs.length ? i : -1, rect: rects[i], k };
+  return { i: i < C.imgs.length ? i : -1, empty: i >= C.imgs.length, rect: rects[i], k };
 }
 let cDrag = null;
 CV2.addEventListener('pointerdown', e => {
   const hit = cellAt(e);
+  if (hit.empty) { pickFiles($('#fileImgs')).then(addCollageFiles); return; }
   if (C.sel !== hit.i) { C.sel = hit.i; collagePanel(); }
   drawCollage();
   if (hit.i < 0) return;
@@ -130,11 +151,13 @@ function collagePanel() {
   el.replaceChildren();
   el.append(h('h2', { text: '拼圖' }));
   el.append(h('button', { class: 'btn primary wide', text: '加入圖片（最多 9 張）', onclick: async () => addCollageFiles(await pickFiles($('#fileImgs'))) }));
-  if (!C.imgs.length) { el.append(h('p', { text: '先加入幾張照片，版型會自動排好。' })); return; }
+  el.append(h('h3', { text: '幾張照片' }));
+  chips(el, [2, 3, 4, 5, 6, 7, 8, 9].map(n => [n, n + ' 張']), C.count, v => { C.count = v; C.layout = 0; C.sel = -1; collagePanel(); drawCollage(); });
+  if (C.imgs.length > C.count) el.append(h('p', { text: '目前有 ' + C.imgs.length + ' 張照片，這個版型只會顯示前 ' + C.count + ' 張。' }));
 
   el.append(h('h3', { text: '版型' }));
   const lay = h('div', { class: 'layouts' });
-  LAYOUTS[clamp(C.imgs.length, 1, 9)].forEach((rects, i) => {
+  LAYOUTS[C.count].forEach((rects, i) => {
     lay.append(h('button', { 'aria-pressed': String(i === C.layout), 'aria-label': '版型 ' + (i + 1), onclick: () => { C.layout = i; collagePanel(); drawCollage(); } }, layoutIcon(rects)));
   });
   el.append(lay);
@@ -147,7 +170,7 @@ function collagePanel() {
 
   el.append(h('hr'));
   const it = C.imgs[C.sel];
-  if (!it) el.append(h('p', { text: '點一格可以選取那張照片；按住拖曳可以調整照片在格子裡的位置。' }));
+  if (!it) el.append(h('p', { text: '點有加號的空格可以放照片。點已有照片的格子可以選取它，按住拖曳可以調整照片在格子裡的位置。' }));
   else {
     el.append(h('h3', { text: '選取的照片（第 ' + (C.sel + 1) + ' 格）' }));
     slider(el, { label: '放大', min: 100, max: 300, value: Math.round(it.zoom * 100), def: 100, fmt: v => v + '%', onInput: v => { it.zoom = v / 100; drawCollage(); } });
@@ -166,7 +189,7 @@ function collagePanel() {
           try { it.cv = await fileToCanvas(f, 2400); it.ox = it.oy = 0.5; it.zoom = 1; drawCollage(); } catch (e) { toast('無法讀取 ' + f.name); }
         }
       }),
-      h('button', { class: 'btn danger', text: '移除', onclick: () => { C.imgs.splice(C.sel, 1); C.sel = -1; C.layout = 0; collagePanel(); drawCollage(); } })));
+      h('button', { class: 'btn danger', text: '移除', onclick: () => { C.imgs.splice(C.sel, 1); C.sel = -1; collagePanel(); drawCollage(); } })));
   }
   el.append(h('hr'));
   el.append(h('button', {
