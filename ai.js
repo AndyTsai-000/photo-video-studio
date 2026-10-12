@@ -99,6 +99,7 @@ function aiCall(msg, transfer, label) {
   });
 }
 function aiCancel() {
+  if (AV.busy) AV.cancel = true;   // 虛擬人製作影片時也是用這個進度條
   if (!AI.job) return;
   const job = AI.job;
   AI.worker.terminate(); AI.worker = null; AI.job = null;

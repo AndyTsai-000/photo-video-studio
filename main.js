@@ -1,7 +1,7 @@
 // 模式切換、上方工具列、匯出設定
 let MODE = 'home';
 const OPEN_LABEL = { photo: '開啟圖片', collage: '加入圖片', video: '加入素材' };
-const MODES = ['home', 'auto', 'photo', 'collage', 'video'];
+const MODES = ['home', 'auto', 'avatar', 'photo', 'collage', 'video'];
 
 // 匯出設定會記在瀏覽器裡，下次打開沿用
 const EXP = {
@@ -24,11 +24,13 @@ function saveExp() {
 
 function setMode(mode) {
   if (MODE === 'video' && mode !== 'video') pause();
+  if (MODE === 'avatar' && mode !== 'avatar') avatarStop();
   MODE = mode;
   $('#app').dataset.mode = mode;
   for (const id of MODES) $('#' + id).hidden = id !== mode;
-  $('#barActions').hidden = mode === 'home' || mode === 'auto';
+  $('#barActions').hidden = mode === 'home' || mode === 'auto' || mode === 'avatar';
   if (mode === 'auto') autoPanel();
+  if (mode === 'avatar') { syncAvatarEmpty(); avatarPanel(); }
   $$('.modes button').forEach(b => b.setAttribute('aria-selected', String(b.dataset.mode === mode)));
   $('#undoBtn').hidden = $('#redoBtn').hidden = mode === 'collage';
   $('#openBtn').textContent = OPEN_LABEL[mode] || '';
@@ -38,6 +40,7 @@ function setMode(mode) {
 }
 function refit() {
   if (MODE === 'home' || MODE === 'auto') return;
+  if (MODE === 'avatar') { avatarRefresh(); return; }
   if (MODE === 'photo') { fit(PV, P.zoom); syncCropBox(); }
   else if (MODE === 'collage') drawCollage();
   else { fit(VC); rebuildTL(); drawFrame(); }
@@ -56,6 +59,7 @@ function setPanelOff(mode, off) {
 }
 async function openForMode(files) {
   if (MODE === 'auto') { if (files) addAutoFiles(files); return; }
+  if (MODE === 'avatar') { const f = (files || []).find(x => x.type.startsWith('image/')); if (f) setAvatarPhoto(f); return; }
   if (MODE === 'home') {
     // 在首頁拖進檔案：依檔案種類決定要進哪個模式
     if (!files) return;
@@ -144,6 +148,19 @@ function drawHomePreviews() {
   sx.fillStyle = '#15131a'; sx.fillRect(0, 0, 480, 300);
   [3, 1, 0, 2].forEach((v, i) => { sx.save(); sx.translate(70 + i * 113, 150); sx.rotate((i - 1.5) * 0.07); sx.drawImage(makeSample(v, 150, 220), -75, -110); sx.restore(); });
   cover('#homeAuto', strip);
+  // 虛擬人的示意圖：一個簡單的人像加上說話的聲波
+  const av = mk(480, 300), ax = av.getContext('2d'), bgG = ax.createLinearGradient(0, 0, 480, 300);
+  bgG.addColorStop(0, '#2b2a66'); bgG.addColorStop(1, '#7a4f9f');
+  ax.fillStyle = bgG; ax.fillRect(0, 0, 480, 300);
+  ax.fillStyle = '#f2c9a5'; ax.beginPath(); ax.arc(170, 135, 62, 0, Math.PI * 2); ax.fill();                      // 臉
+  ax.fillStyle = '#3a2a4a'; ax.beginPath(); ax.arc(170, 112, 66, Math.PI, 0); ax.fill();                           // 頭髮
+  ax.fillStyle = '#62d2c6'; ax.beginPath(); ax.ellipse(170, 300, 110, 95, 0, Math.PI, 0); ax.fill();               // 肩膀
+  ax.fillStyle = '#2a1a30'; ax.beginPath(); ax.arc(148, 132, 6, 0, Math.PI * 2); ax.arc(192, 132, 6, 0, Math.PI * 2); ax.fill();
+  ax.fillStyle = '#8a2a3a'; ax.beginPath(); ax.ellipse(170, 166, 15, 10, 0, 0, Math.PI * 2); ax.fill();             // 張開的嘴
+  ax.strokeStyle = '#ffffff'; ax.lineCap = 'round'; ax.lineWidth = 7;
+  [22, 46, 70, 38, 58, 26, 44].forEach((hgt, i) => { const x = 285 + i * 24; ax.globalAlpha = 0.9 - i * 0.07; ax.beginPath(); ax.moveTo(x, 150 - hgt / 2); ax.lineTo(x, 150 + hgt / 2); ax.stroke(); });
+  ax.globalAlpha = 1;
+  cover('#homeAvatar', av);
 }
 $('#openBtn').addEventListener('click', () => openForMode());
 $('#exportBtn').addEventListener('click', openExportDialog);
@@ -165,14 +182,14 @@ window.addEventListener('drop', e => {
 });
 window.addEventListener('paste', e => {
   const files = [...(e.clipboardData ? e.clipboardData.files : [])].filter(f => f.type.startsWith('image/'));
-  if (files.length && MODE !== 'video' && MODE !== 'auto') { e.preventDefault(); openForMode(files); }
+  if (files.length && MODE !== 'video' && MODE !== 'auto' && MODE !== 'avatar') { e.preventDefault(); openForMode(files); }
 });
 
 window.addEventListener('keydown', e => {
   const tag = e.target.tagName;
   const typing = tag === 'TEXTAREA' || tag === 'SELECT' || (tag === 'INPUT' && e.target.type !== 'range');
   if (e.key === 'Escape') closeExportDialog();
-  if (typing || V.exporting || !$('#dlg').hidden || MODE === 'home' || MODE === 'auto') return;
+  if (typing || V.exporting || !$('#dlg').hidden || MODE === 'home' || MODE === 'auto' || MODE === 'avatar') return;
   const key = e.key.toLowerCase(), cmd = e.ctrlKey || e.metaKey, video = MODE === 'video';
   if (MODE !== 'collage' && cmd && key === 'z') { e.preventDefault(); e.shiftKey ? (video ? vRedo() : redo()) : (video ? vUndo() : undo()); }
   else if (MODE !== 'collage' && cmd && key === 'y') { e.preventDefault(); video ? vRedo() : redo(); }
@@ -186,5 +203,6 @@ new ResizeObserver(refit).observe($('#app'));
 initPhoto();
 initCollage();
 initVideo();
+initAvatar();
 drawHomePreviews();
 setMode('home');

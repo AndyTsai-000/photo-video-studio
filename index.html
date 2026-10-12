@@ -13,6 +13,7 @@
       <button role="tab" data-mode="collage" aria-selected="false">拼圖</button>
       <button role="tab" data-mode="video" aria-selected="false">剪輯</button>
       <button role="tab" data-mode="auto" aria-selected="false">智能剪片</button>
+      <button role="tab" data-mode="avatar" aria-selected="false">虛擬人</button>
     </nav>
     <div class="bar-actions" id="barActions" hidden>
       <button id="undoBtn" class="btn ghost" title="復原（Ctrl+Z）">復原</button>
@@ -27,13 +28,18 @@
     <div class="home-inner">
       <h1>今天想做什麼？</h1>
       <p class="home-lead">修圖、拼圖、剪輯影片都在這裡完成。檔案只在你的裝置上處理，不會上傳。</p>
-      <button class="home-card home-feature" data-go="auto">
-        <canvas id="homeAuto" width="480" height="300"></canvas>
-        <div>
+      <div class="home-features">
+        <button class="home-card home-feature" data-go="auto">
+          <canvas id="homeAuto" width="480" height="300"></canvas>
           <strong>AI 智能剪片</strong>
-          <span>放進照片和影片，選好風格、比例、配樂，按一下就自動挑片段、對節拍、加轉場和字幕，剪成一支影片。剪完還能再微調。</span>
-        </div>
-      </button>
+          <span>放進照片和影片，選好風格、比例、配樂，按一下就自動挑片段、對節拍、加轉場和字幕，剪成一支影片。</span>
+        </button>
+        <button class="home-card home-feature" data-go="avatar">
+          <canvas id="homeAvatar" width="480" height="300"></canvas>
+          <strong>虛擬人</strong>
+          <span>放一張人像照片，輸入想說的話，照片裡的人就會開口把這段話說出來，做成影片。</span>
+        </button>
+      </div>
       <div class="home-cards">
         <button class="home-card" data-go="photo">
           <canvas id="homePhoto" width="480" height="300"></canvas>
@@ -57,6 +63,21 @@
 
   <section class="mode" id="auto" hidden>
     <div class="home-inner auto-inner" id="autoInner"></div>
+  </section>
+
+  <section class="mode" id="avatar" hidden>
+    <div class="stage">
+      <div class="fitbox">
+        <div class="canvas-wrap"><canvas id="avc"></canvas></div>
+        <div class="empty" id="avatarEmpty" hidden>
+          <strong>還沒有人像照片</strong>
+          <span>選一張正面、臉部清楚的照片，也可以直接拖進來。</span>
+          <button class="btn primary" id="avatarEmptyBtn">選人像照片</button>
+        </div>
+      </div>
+      <div class="stage-foot" id="avatarFoot"><button id="avPlay" class="btn primary small">播放</button><span>嘴型會跟著聲音大小開合</span></div>
+    </div>
+    <aside class="panel" id="avatarPanel"></aside>
   </section>
 
   <section class="mode" id="photo" hidden>
@@ -174,13 +195,13 @@
 <script>
   // 每次改版把 VERSION 加一。只有在 GitHub Pages 才加版本參數，避免瀏覽器繼續用舊的程式檔
   (function () {
-    var VERSION = '26', bust = /github\.io$/.test(location.hostname) ? '?v=' + VERSION : '';
+    var VERSION = '27', bust = /github\.io$/.test(location.hostname) ? '?v=' + VERSION : '';
     if (bust) {
       var css = document.createElement('link');
       css.rel = 'stylesheet'; css.href = 'app.css' + bust;
       document.head.appendChild(css);
     }
-    ['core', 'ai', 'photo', 'collage', 'video', 'stt', 'music', 'auto', 'main'].forEach(function (name) {
+    ['core', 'ai', 'photo', 'collage', 'video', 'stt', 'music', 'auto', 'avatar', 'main'].forEach(function (name) {
       var s = document.createElement('script');
       s.src = name + '.js' + bust; s.async = false;
       document.body.appendChild(s);
