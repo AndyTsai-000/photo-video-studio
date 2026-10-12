@@ -192,6 +192,15 @@ function slider(parent, o) {
   parent.append(h('div', { class: 'row' }, h('label', { for: id, text: o.label }), out, inp));
   return inp;
 }
+// 可收合的分類：回傳放內容的容器。預設收著，使用者點箭頭才展開；展開狀態在面板重畫後保留
+const GROUP_OPEN = {};
+function group(parent, id, title, open) {
+  const body = h('div', { class: 'group-body' });
+  const box = h('details', { class: 'group', open: id in GROUP_OPEN ? GROUP_OPEN[id] : !!open }, h('summary', { text: title }), body);
+  box.addEventListener('toggle', () => { GROUP_OPEN[id] = box.open; });
+  parent.append(box);
+  return body;
+}
 function chips(parent, options, current, onPick) {
   const box = h('div', { class: 'chips' });
   for (const [value, label] of options) {

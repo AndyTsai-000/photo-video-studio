@@ -213,32 +213,34 @@ function layoutIcon(rects) {
   return c;
 }
 function collagePanel() {
-  const el = $('#collagePanel');
+  const root = $('#collagePanel');
+  let el = root;
   el.replaceChildren();
   el.append(h('h2', { text: '拼圖' }));
   el.append(h('button', { class: 'btn primary wide', text: '加入圖片（最多 ' + COLLAGE_MAX + ' 張）', onclick: async () => addCollageFiles(await pickFiles($('#fileImgs'))) }));
   if (!C.imgs.length) { el.append(h('p', { text: '先選照片。選了幾張，這裡就會出現那個張數可以用的版型。' })); return; }
 
-  const layHead = h('h3', { text: C.imgs.length + ' 張照片的版型' });
-  el.append(layHead);
+  el = group(root, 'col.layout', C.imgs.length + ' 張照片的版型');
+  const layHead = h('span');
   const lay = h('div', { class: 'layouts' });
   layoutList().forEach((rects, i) => {
     lay.append(h('button', { 'aria-pressed': String(i === C.layout), 'aria-label': '版型 ' + (i + 1), onclick: () => { C.layout = i; collagePanel(); drawCollage(); } }, layoutIcon(rects)));
   });
   el.append(lay);
   if (isStitch()) { layHead.hidden = lay.hidden = true; el.append(h('p', { text: '長圖拼接會讓每張照片保持原本的比例，依序接起來，適合拼對話截圖或步驟圖。' })); }
-  el.append(h('h3', { text: '畫布比例' }));
+  el = group(root, 'col.ratio', '畫布比例');
   chips(el, Object.keys(RATIOS).map(k => [k, k]).concat([['v', '直向長圖'], ['h', '橫向長圖']]), C.ratio, v => { C.ratio = v; collagePanel(); drawCollage(); });
+  el = group(root, 'col.gap', '間距與圓角');
   slider(el, { label: '間距', min: 0, max: 8, step: 0.5, value: C.gap, def: 2, onInput: v => { C.gap = v; drawCollage(); } });
   slider(el, { label: '圓角', min: 0, max: 12, step: 0.5, value: C.radius, def: 2, onInput: v => { C.radius = v; drawCollage(); } });
-  el.append(h('h3', { text: '底色' }));
+  el = group(root, 'col.bg', '底色');
   swatches(el, ['#ffffff', '#1a1a1a', '#f3e9dc', '#ffd9e4', '#d9f2ee'], C.bg, c => { C.bg = c; drawCollage(); });
 
-  el.append(h('hr'));
+  el = root;
   const it = C.imgs[C.sel];
   if (!it) el.append(h('p', { text: '按住照片拖到另一格，放開就會交換位置。在同一格裡拖曳，可以移動照片顯示的範圍。' }));
   else {
-    el.append(h('h3', { text: '選取的照片（第 ' + (C.sel + 1) + ' 格）' }));
+    el = group(root, 'col.sel', '選取的照片（第 ' + (C.sel + 1) + ' 格）', true);
     slider(el, { label: '放大', min: 100, max: 300, value: Math.round(it.zoom * 100), def: 100, fmt: v => v + '%', onInput: v => { it.zoom = v / 100; drawCollage(); } });
     el.append(h('div', { class: 'chips' },
       h('button', {
@@ -250,7 +252,7 @@ function collagePanel() {
       }),
       h('button', { class: 'btn danger', text: '移除', onclick: () => { C.imgs.splice(C.sel, 1); C.sel = -1; C.layout = 0; collagePanel(); drawCollage(); } })));
   }
-  el.append(h('hr'));
+  el = root;
   el.append(h('button', {
     class: 'btn wide', text: '送到「修圖」繼續編輯',
     onclick: () => {

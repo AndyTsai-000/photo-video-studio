@@ -53,7 +53,7 @@ const P = {
   adj: {}, preset: 'none', presetAmt: 100,
   beauty: { smooth: 0, whiten: 0, rosy: 0 },
   frame: { type: 'none', color: '#ffffff', color2: '#ff5d8f', size: 5 },
-  tool: 'adjust', hist: [], redo: [], open: { light: true, color: true, quality: true, fx: true, hsl: false },
+  tool: 'adjust', hist: [], redo: [], open: { light: false, color: false, quality: false, fx: false, hsl: false },
   crop: { x: 0, y: 0, w: 1, h: 1 }, cropRatio: 0,
   brushMode: 'doodle', brushColor: '#ff5d8f', brushSize: { doodle: 30, mosaic: 40, erase: 40, liquify: 45, retouch: 35, mask: 30, mark: 35 },
   cut: null, cutModel: 'Xenova/modnet', maskBrush: '', mark: null,
@@ -1055,12 +1055,12 @@ function deleteSelected() {
   showTool(P.tool);
   requestRender();
 }
-function objSliders(el, o) {
+function objSliders(el, o, root) {
   const m = Math.min(P.base.width, P.base.height), name = { text: '文字', sticker: '貼圖', image: '圖片' }[o.type];
   slider(el, { label: '大小', min: 2, max: o.type === 'image' ? 150 : 60, value: Math.round(o.size / m * 100), onStart: pushHistory, onInput: v => { o.size = m * v / 100; requestRender(); } });
   slider(el, { label: '旋轉', min: -180, max: 180, value: Math.round(((o.rot + 180) % 360 + 360) % 360 - 180), def: 0, fmt: v => v + '°', onStart: pushHistory, onInput: v => { o.rot = v; requestRender(); } });
   slider(el, { label: '不透明度', min: 10, max: 100, value: Math.round((o.alpha == null ? 1 : o.alpha) * 100), def: 100, fmt: v => v + '%', onStart: pushHistory, onInput: v => { o.alpha = v / 100; requestRender(); } });
-  el.append(h('button', { class: 'btn danger wide', text: '刪除這個' + name, onclick: deleteSelected }));
+  (root || el).append(h('button', { class: 'btn danger wide', text: '刪除這個' + name, onclick: deleteSelected }));
 }
 // 自動調整：量照片的明暗分布和色偏，換算成滑桿數值（只動滑桿，不改原圖）
 function autoAdjust() {
@@ -1163,6 +1163,8 @@ const PANELS = {
   },
   filter(el) {
     el.append(h('h2', { text: '濾鏡' }));
+    const root = el;
+    el = group(root, 'filter.preset', '濾鏡' + (P.preset !== 'none' ? '：' + PRESETS.find(p => p[0] === P.preset)[1] : ''));
     const grid = h('div', { class: 'thumbs' });
     const side = Math.min(P.base.width, P.base.height), tsrc = mk(96, 96);
     tsrc.getContext('2d').drawImage(P.base, (P.base.width - side) / 2, (P.base.height - side) / 2, side, side, 0, 0, 96, 96);
@@ -1176,16 +1178,18 @@ const PANELS = {
     }
     el.append(grid);
     if (P.preset !== 'none') slider(el, { label: '濾鏡強度', min: 0, max: 100, value: P.presetAmt, def: 100, onStart: pushHistory, onInput: v => { P.presetAmt = v; requestRender(); } });
-    el.append(h('hr'), h('h3', { text: '特效' }));
+    el = group(root, 'filter.fx', '特效' + (P.fx.type !== 'none' ? '：' + PHOTO_FX.find(f => f[0] === P.fx.type)[1] : ''));
     chips(el, PHOTO_FX, P.fx.type, v => { pushHistory(); P.fx.type = v; showTool('filter'); requestRender(); });
     if (P.fx.type !== 'none' && P.fx.type !== 'mirror') slider(el, { label: '特效強度', min: 0, max: 100, value: P.fx.amt, def: 60, onStart: pushHistory, onInput: v => { P.fx.amt = v; requestRender(); } });
   },
   beauty(el) {
     el.append(h('h2', { text: '美顏' }));
+    const root = el;
+    el = group(root, 'beauty.skin', '膚質（磨皮、美白、紅潤）');
     for (const [k, label] of [['smooth', '磨皮'], ['whiten', '美白'], ['rosy', '紅潤']]) {
       slider(el, { label, min: 0, max: 100, value: P.beauty[k], def: 0, onStart: pushHistory, onInput: v => { P.beauty[k] = v; requestRender(); } });
     }
-    el.append(h('hr'), h('h3', { text: '瘦臉、修身' }));
+    el = group(root, 'beauty.liq', '瘦臉、修身');
     el.append(h('button', {
       class: 'btn wide', 'aria-pressed': String(P.liqOn), text: P.liqOn ? '推移筆：使用中' : '開啟推移筆',
       onclick: () => { P.liqOn = !P.liqOn; showTool('beauty'); }
@@ -1198,7 +1202,10 @@ const PANELS = {
   },
   retouch(el) {
     el.append(h('h2', { text: '細修' }), h('p', { text: '選一種效果，在照片上塗抹：人物、物品、天空、背景，塗到哪裡就只改哪裡。' }));
+    const root = el;
+    el = group(root, 'retouch.fx', '效果：' + RETOUCH_FX.find(f => f[0] === RT.fx)[1]);
     chips(el, RETOUCH_FX.map(f => [f[0], f[1]]), RT.fx, v => { RT.fx = v; RT.picking = false; showTool('retouch'); });
+    el = group(root, 'retouch.brush', '筆刷大小與強度');
     slider(el, { label: '筆刷大小', min: 1, max: 100, value: P.brushSize.retouch, onInput: v => { P.brushSize.retouch = v; } });
     if (RT.fx === 'clone') {
       el.append(h('p', { text: RT.src && !RT.picking ? '取樣點已設定。在要蓋掉的地方塗抹，會把取樣點附近的畫面複製過去。' : '先在照片上點一下「要複製的乾淨區域」（例如雜物旁邊的牆面或草地）。' }));
@@ -1220,8 +1227,9 @@ const PANELS = {
       el.append(h('p', { text: '第一次使用要下載 AI 模型，之後就不用了。照片只在你的裝置上處理。' }));
       return;
     }
-    const c = P.cut, bg = c.bg, redraw = () => requestRender();
-    el.append(h('h3', { text: '背景' }));
+    const c = P.cut, bg = c.bg, redraw = () => requestRender(), root = el;
+    if (cutMovable()) root.append(h('p', { text: '在照片上按住主體拖曳，可以移動它的位置。' }));
+    el = group(root, 'cut.bg', '背景');
     chips(el, [['transparent', '透明'], ['color', '純色'], ['gradient', '漸層'], ['image', '換成照片'], ['blur', '模糊原背景'], ['gray', '背景變黑白']], bg.type, v => { pushHistory(); bg.type = v; if (!cutMovable()) { c.dx = c.dy = 0; c.scale = 1; } showTool('cutout'); redraw(); });
     if (bg.type === 'transparent') el.append(h('p', { text: '匯出時選 PNG 才能保留透明背景。' }));
     if (bg.type === 'color' || bg.type === 'gradient') {
@@ -1242,16 +1250,16 @@ const PANELS = {
       }));
     }
     if (bg.type === 'blur') slider(el, { label: '模糊程度', min: 5, max: 100, value: bg.blur, def: 50, onStart: pushHistory, onInput: v => { bg.blur = v; redraw(); } });
+    el = group(root, 'cut.pos', '主體大小與邊緣');
     if (cutMovable()) {
-      el.append(h('p', { text: '在照片上按住主體拖曳，可以移動它的位置。' }));
       slider(el, { label: '主體大小', min: 30, max: 250, value: Math.round((c.scale || 1) * 100), def: 100, fmt: v => v + '%', onStart: pushHistory, onInput: v => { c.scale = v / 100; redraw(); } });
       if (c.dx || c.dy || (c.scale || 1) !== 1) el.append(h('button', { class: 'btn wide', text: '主體放回原本的位置和大小', onclick: () => { pushHistory(); c.dx = c.dy = 0; c.scale = 1; showTool('cutout'); redraw(); } }));
     }
     slider(el, { label: '邊緣柔化', min: 0, max: 10, step: 0.5, value: c.feather, def: 1, onStart: pushHistory, onInput: v => { c.feather = v; redraw(); } });
-    el.append(h('hr'), h('h3', { text: '修邊（去得不乾淨時用）' }));
+    el = group(root, 'cut.edge', '修邊（去得不乾淨時用）');
     chips(el, [['', '不修'], ['maskAdd', '塗回主體'], ['maskErase', '擦掉多餘']], P.maskBrush, v => { P.maskBrush = v; showTool('cutout'); });
     if (P.maskBrush) slider(el, { label: '筆刷大小', min: 1, max: 100, value: P.brushSize.mask, onInput: v => { P.brushSize.mask = v; } });
-    el.append(h('hr'));
+    el = group(root, 'cut.redo', '重新去背、取消去背');
     el.append(h('div', { class: 'chips' },
       h('button', { class: 'btn', text: '重新去背', onclick: runCutout }),
       h('button', { class: 'btn danger', text: '取消去背', onclick: () => { pushHistory(); P.cut = null; P.maskBrush = ''; showTool('cutout'); redraw(); } })));
@@ -1266,15 +1274,18 @@ const PANELS = {
     el.append(h('p', { text: '第一次使用要下載約 208MB 的 AI 模型；每次清除大約需要半分鐘。一次清一樣東西，結果會比一次清很多樣好。' }));
   },
   crop(el) {
-    el.append(h('h2', { text: '裁切與旋轉' }), h('h3', { text: '比例' }));
+    const root = el;
+    el.append(h('h2', { text: '裁切與旋轉' }));
+    el = group(root, 'crop.ratio', '比例裁切');
     chips(el, [[0, '自由'], [1, '1:1'], [4 / 3, '4:3'], [3 / 4, '3:4'], [16 / 9, '16:9'], [9 / 16, '9:16']], P.cropRatio, setCropRatio);
     el.append(h('button', { class: 'btn primary wide', text: '套用裁切', onclick: applyCrop }));
-    el.append(h('hr'), h('h3', { text: '旋轉、翻轉' }));
+    el = group(root, 'crop.rot', '旋轉、翻轉');
     el.append(h('div', { class: 'chips' },
       h('button', { class: 'btn', text: '向左轉', onclick: () => rotate90(false) }),
       h('button', { class: 'btn', text: '向右轉', onclick: () => rotate90(true) }),
       h('button', { class: 'btn', text: '左右翻', onclick: () => flip(true) }),
       h('button', { class: 'btn', text: '上下翻', onclick: () => flip(false) })));
+    el = group(root, 'crop.straighten', '拉正（照片歪掉時用）');
     let from = null;
     slider(el, {
       label: '拉正（微調角度）', min: -30, max: 30, step: 0.5, value: 0, def: 0, fmt: v => v + '°',
@@ -1304,11 +1315,12 @@ const PANELS = {
     });
     ta.addEventListener('blur', () => { dirty = false; });
     el.append(h('label', { class: 'field', for: 'textEdit' }, '內容', ta));
-    el.append(h('h3', { text: '樣式範本（點一下直接套用）' }));
+    const root = el;
+    el = group(root, 'text.style', '樣式範本（點一下直接套用）');
     el.append(h('div', { class: 'chips' }, TEXT_STYLES.map(([name, st]) => h('button', {
       class: 'btn', text: name, onclick: () => { pushHistory(); Object.assign(o, st); loadFontFor(o); showTool('text'); requestRender(); }
     }))));
-    el.append(h('h3', { text: '字體' }));
+    el = group(root, 'text.font', '字體與顏色');
     chips(el, Object.entries(FONTS).map(([k, v]) => [k, v[0]]), o.font, v => { pushHistory(); o.font = v; loadFontFor(o); requestRender(); });
     el.append(h('div', { class: 'chips' },
       h('button', { class: 'btn', 'aria-pressed': String(o.bold), text: '粗體', onclick: () => { pushHistory(); o.bold = !o.bold; loadFontFor(o); showTool('text'); requestRender(); } }),
@@ -1320,10 +1332,12 @@ const PANELS = {
       el.append(h('h3', { text: '描邊顏色' }));
       swatches(el, ['#1a1a1a', '#ffffff', '#ff5d8f', '#6b3f7d'], o.strokeColor, c => { o.strokeColor = c; requestRender(); });
     }
-    objSliders(el, o);
+    objSliders(group(root, 'text.size', '大小、旋轉、透明度'), o, root);
   },
   sticker(el) {
+    const root = el;
     el.append(h('h2', { text: '貼圖' }));
+    el = group(root, 'sticker.grid', '表情貼圖');
     const grid = h('div', { class: 'stickers' });
     for (const s of STICKERS) {
       grid.append(h('button', {
@@ -1332,6 +1346,7 @@ const PANELS = {
       }));
     }
     el.append(grid);
+    el = root;
     el.append(h('button', {
       class: 'btn wide', text: '加入自己的圖片（Logo、浮水印）',
       onclick: async () => {
@@ -1344,7 +1359,7 @@ const PANELS = {
       }
     }));
     const o = P.sel && P.sel.type !== 'text' ? P.sel : null;
-    if (o) { el.append(h('hr')); objSliders(el, o); }
+    if (o) objSliders(group(root, 'sticker.adj', '調整選取的' + (o.type === 'image' ? '圖片' : '貼圖')), o, root);
     else el.append(h('p', { text: '點一個貼圖放到圖上，再拖到想要的位置。' }));
   },
   brush(el) {
@@ -1359,6 +1374,8 @@ const PANELS = {
   },
   frame(el) {
     el.append(h('h2', { text: '邊框' }));
+    const root = el;
+    el = group(root, 'frame.type', '款式' + (P.frame.type !== 'none' ? '（已套用）' : ''));
     chips(el, [['none', '無'], ['solid', '純色邊'], ['line', '細線'], ['double', '雙線'], ['corner', '相角'], ['shadow', '立體陰影'], ['polaroid', '拍立得'], ['film', '底片'], ['round', '圓角'], ['circle', '圓形'], ['gradient', '漸層']], P.frame.type, v => {
       pushHistory();
       P.frame.type = v;
@@ -1366,6 +1383,7 @@ const PANELS = {
       showTool('frame'); requestRender();
     });
     if (P.frame.type === 'none') return;
+    el = group(root, 'frame.color', '顏色與寬度');
     el.append(h('h3', { text: P.frame.type === 'gradient' ? '漸層起點顏色' : '邊框顏色' }));
     swatches(el, ['#ffffff', '#1a1a1a', '#f3e9dc', '#ffd9e4', '#d9f2ee'], P.frame.color, c => { P.frame.color = c; requestRender(); });
     if (P.frame.type === 'gradient') {

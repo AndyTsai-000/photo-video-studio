@@ -557,13 +557,15 @@ function deleteVideoSelection() {
 
 // ── 右側設定面板 ──
 function vPanel() {
-  const el = $('#videoPanel');
+  const root = $('#videoPanel');
+  let el = root;
   el.replaceChildren();
   const clip = V.clips.find(c => c.id === V.sel), text = V.texts.find(t => t.id === V.selText);
   const refresh = () => { rebuildTL(); drawFrame(); };
 
   if (clip) {
     el.append(h('h2', { text: '片段設定' }), h('p', { text: clip.name }));
+    el = group(root, 'clip.trim', clip.kind === 'video' ? '修剪、速度、音量' : '顯示長度');
     if (clip.kind === 'video') {
       const fmt = v => v.toFixed(1) + ' 秒';
       slider(el, { label: '起點', min: 0, max: clip.srcDur, step: 0.05, value: clip.in, fmt, onStart: pause, onInput: v => { clip.in = Math.min(v, clip.out - 0.1); rebuildTL(); seek(clipStart(clip)); } });
@@ -573,7 +575,7 @@ function vPanel() {
     } else {
       slider(el, { label: '顯示長度', min: 0.5, max: 15, step: 0.5, value: clip.out, def: 3, fmt: v => v + ' 秒', onStart: pause, onInput: v => { clip.out = v; rebuildTL(); seek(Math.min(V.t, totalDur())); } });
     }
-    el.append(h('h3', { text: '這個片段的文字' }));
+    el = group(root, 'clip.text', '文字');
     el.append(h('button', { class: 'btn primary wide', text: '加一段文字', onclick: () => addClipText(clip) }));
     const mine = V.texts.filter(t => t.clip === clip.id && !t.auto);
     if (mine.length) {
@@ -583,7 +585,7 @@ function vPanel() {
       }))));
     }
     if (clip.kind === 'video') {
-      el.append(h('h3', { text: '自動字幕' }));
+      el = group(root, 'clip.cap', '自動字幕');
       const autos = V.texts.filter(t => t.clip === clip.id && t.auto);
       const busy = (STT.job && STT.job.clip.el === clip.el) || STT.queue.some(q => q.el === clip.el);
       if (busy) el.append(h('p', { text: '正在聽這支影片的聲音，完成後字幕會出現在時間軸上。' }));
@@ -595,24 +597,26 @@ function vPanel() {
           h('button', { class: 'btn danger', text: '刪除字幕', onclick: () => { V.texts = V.texts.filter(t => !(t.clip === clip.id && t.auto)); refresh(); vPanel(); } })));
       } else el.append(h('button', { class: 'btn wide', text: '聽聲音自動產生字幕', onclick: () => queueCaptions(clip) }));
     }
+    el = group(root, 'clip.trans', '轉場與鏡頭');
     el.append(h('h3', { text: '轉場（從上一段進到這一段）' }));
     if (V.clips[0] === clip) el.append(h('p', { text: '第一個片段前面沒有畫面，不需要轉場。' }));
     else chips(el, V_TRANS, clip.trans || 'none', v => { clip.trans = v; });
     el.append(h('h3', { text: '鏡頭' }));
     chips(el, [['none', '不動'], ['in', '緩慢推近'], ['out', '緩慢拉遠']], clip.kb || 'none', v => { clip.kb = v; drawFrame(); });
-    el.append(h('h3', { text: '濾鏡' }));
+    el = group(root, 'clip.filter', '濾鏡與色彩');
     chips(el, V_FILTERS.map(f => [f[0], f[1]]), clip.filter, v => { clip.filter = v; drawFrame(); });
     for (const [k, label] of [['b', '亮度'], ['c', '對比'], ['s', '飽和度']]) {
       slider(el, { label, min: -100, max: 100, value: clip[k], def: 0, onInput: v => { clip[k] = v; drawFrame(); } });
     }
     slider(el, { label: '暗角', min: 0, max: 100, value: clip.vig || 0, def: 0, onInput: v => { clip.vig = v; drawFrame(); } });
-    el.append(h('h3', { text: '畫面' }));
+    el = group(root, 'clip.frame', '畫面（填滿、旋轉、放大、淡入淡出）');
     chips(el, [['cover', '填滿畫面'], ['contain', '完整顯示'], ['blur', '模糊背景']], clip.fit, v => { clip.fit = v; drawFrame(); });
     el.append(h('div', { class: 'chips' },
       h('button', { class: 'btn', text: '向右轉 90°', onclick: () => { clip.rot = (clip.rot + 90) % 360; drawFrame(); } }),
       h('button', { class: 'btn', 'aria-pressed': String(clip.flip), text: '左右鏡像', onclick: () => { clip.flip = !clip.flip; vPanel(); drawFrame(); } })));
     slider(el, { label: '放大', min: 100, max: 300, step: 5, value: Math.round(clip.zoom * 100), def: 100, fmt: v => v + '%', onInput: v => { clip.zoom = v / 100; drawFrame(); } });
     el.append(h('button', { class: 'btn wide', 'aria-pressed': String(clip.fade), text: '開頭結尾淡入淡出', onclick: () => { clip.fade = !clip.fade; vPanel(); drawFrame(); } }));
+    el = root;
     el.append(h('button', { class: 'btn ghost wide', text: '回到專案設定', onclick: () => { V.sel = null; rebuildTL(); vPanel(); } }));
     return;
   }
@@ -626,10 +630,11 @@ function vPanel() {
     ta.value = text.text;
     ta.addEventListener('input', () => { text.text = ta.value; refresh(); });
     el.append(h('label', { class: 'field', for: 'vTextEdit' }, '內容', ta));
+    el = group(root, 'vtext.time', '出現時間與長度');
     const fmt = v => v.toFixed(1) + ' 秒';
     slider(el, { label: '出現時間（片段內）', min: 0, max: Math.max(0.1, clipDur(owner)), step: 0.1, value: clamp((text.at - base) / k, 0, clipDur(owner)), fmt, onStart: pause, onInput: v => { text.at = base + v * k; rebuildTL(); seek(clipStart(owner) + v + 0.05); } });
     slider(el, { label: '顯示長度', min: 0.3, max: Math.max(15, Math.ceil(clipDur(owner))), step: 0.1, value: clamp(text.dur / k, 0.3, Math.max(15, Math.ceil(clipDur(owner)))), fmt, onInput: v => { text.dur = v * k; refresh(); } });
-    el.append(h('hr'), h('h3', { text: text.auto ? '樣式（這個片段的字幕一起套用）' : '樣式' }));
+    el = group(root, 'vtext.style', text.auto ? '樣式（這個片段的字幕一起套用）' : '樣式（位置、顏色、字體、大小）');
     chips(el, [['top', '上方'], ['middle', '中間'], ['bottom', '下方']], st.pos, v => { st.pos = v; drawFrame(); });
     swatches(el, ['#ffffff', '#ffd24a', '#ff5d8f', '#62d2c6', '#1a1a1a'], st.color, c => { st.color = c; drawFrame(); });
     chips(el, Object.entries(FONTS).map(([key, v]) => [key, v[0]]), st.font || 'hei', v => {
@@ -637,11 +642,11 @@ function vPanel() {
       if (document.fonts && document.fonts.load) document.fonts.load('700 40px ' + FONTS[v][1], text.text).then(drawFrame, () => {});
     });
     if (!text.auto) {
-      el.append(h('h3', { text: '出現動畫' }));
-      chips(el, V_TEXT_ANIM, st.anim || 'fade', v => { st.anim = v; seek(clipStart(owner) + clamp((text.at - base) / k, 0, clipDur(owner)) + 0.02); });
+      chips(group(root, 'vtext.anim', '出現動畫'), V_TEXT_ANIM, st.anim || 'fade', v => { st.anim = v; seek(clipStart(owner) + clamp((text.at - base) / k, 0, clipDur(owner)) + 0.02); });
     }
     el.append(h('button', { class: 'btn wide', 'aria-pressed': String(!!st.bg), text: '黑色底條（取代描邊）', onclick: () => { st.bg = !st.bg; vPanel(); drawFrame(); } }));
     slider(el, { label: '大小', min: 3, max: 20, step: 0.5, value: st.size, def: text.auto ? 6 : 7, onInput: v => { st.size = v; drawFrame(); } });
+    el = root;
     el.append(h('button', { class: 'btn danger wide', text: text.auto ? '刪除這一句' : '刪除這段文字', onclick: deleteVideoSelection }));
     el.append(h('button', { class: 'btn ghost wide', text: '回到片段設定', onclick: () => { V.selText = null; V.sel = owner.id; rebuildTL(); vPanel(); } }));
     return;
@@ -659,7 +664,7 @@ function vPanel() {
   el.append(h('button', { class: 'btn wide', text: V.music ? '換一首配樂' : '加入配樂（搜尋、貼網址或選檔）', onclick: openMusicDialog }));
   if (V.music) {
     const m = V.music;
-    el.append(h('p', { text: '配樂：' + m.name }));
+    el = group(root, 'proj.music', '配樂：' + m.name);
     slider(el, { label: '配樂音量', min: 0, max: 100, step: 5, value: Math.round(m.vol * 100), def: 60, fmt: v => v + '%', onInput: v => { m.vol = v / 100; setGain(m.el, m.vol); } });
     slider(el, { label: '從音樂的哪裡開始', min: 0, max: Math.max(1, Math.floor(m.dur) - 1), step: 1, value: Math.min(m.offset, Math.max(0, Math.floor(m.dur) - 1)), def: 0, fmt: v => fmtTime(v).replace(/\.0$/, ''), onStart: pause, onInput: v => { m.offset = v; rebuildTL(); } });
     el.append(h('button', { class: 'btn wide', 'aria-pressed': String(m.fadeOut), text: '影片結尾音樂淡出', onclick: () => { m.fadeOut = !m.fadeOut; setGain(m.el, m.vol); vPanel(); } }));
@@ -674,12 +679,13 @@ function vPanel() {
     }
     el.append(h('button', { class: 'btn danger wide', text: '移除配樂', onclick: () => { m.el.pause(); V.music = null; rebuildTL(); vPanel(); } }));
   }
-  el.append(h('h3', { text: '畫面比例' }));
+  el = group(root, 'proj.aspect', '畫面比例');
   chips(el, [['16:9', '橫式 16:9'], ['9:16', '直式 9:16'], ['1:1', '方形 1:1'], ['4:5', '4:5']], V.aspect, v => { V.aspect = v; setVideoSize(); });
-  el.append(h('hr'));
+  const shotBody = group(root, 'proj.shot', '擷取畫面、定格、字幕檔');
+  el = shotBody;
   el.append(h('button', { class: 'btn wide', text: '把目前畫面送到「修圖」', onclick: snapshotToPhoto }));
   el.append(h('button', { class: 'btn wide', text: '在播放頭插入定格畫面', onclick: addFreezeFrame }));
-  el.append(h('hr'), h('h3', { text: '浮水印、Logo' }));
+  el = group(root, 'proj.mark', '浮水印、Logo' + (V.mark ? '（已加入）' : ''));
   el.append(h('button', {
     class: 'btn wide', text: V.mark ? '換一張浮水印圖片' : '加入浮水印圖片', onclick: async () => {
       const [f] = await pickFiles($('#fileImg'));
@@ -698,8 +704,8 @@ function vPanel() {
     slider(el, { label: '不透明度', min: 10, max: 100, value: Math.round(m.alpha * 100), def: 85, fmt: v => v + '%', onInput: v => { m.alpha = v / 100; drawFrame(); } });
     el.append(h('button', { class: 'btn danger wide', text: '移除浮水印', onclick: () => { V.mark = null; vPanel(); drawFrame(); } }));
   }
-  if (V.texts.length) el.append(h('button', { class: 'btn wide', text: '匯出字幕檔（SRT）', onclick: exportSrt }));
-  el.append(h('hr'), h('h3', { text: '自動字幕' }));
+  if (V.texts.length) shotBody.append(h('button', { class: 'btn wide', text: '匯出字幕檔（SRT）', onclick: exportSrt }));
+  el = group(root, 'proj.stt', '自動字幕' + (STT.auto ? '：開' : '：關'));
   el.append(h('button', {
     class: 'btn wide', 'aria-pressed': String(STT.auto), text: STT.auto ? '加入影片時自動產生字幕：開' : '加入影片時自動產生字幕：關',
     onclick: () => { STT.auto = !STT.auto; if (STT.auto) STT.broken = false; else cancelStt(); saveSttPrefs(); vPanel(); }
@@ -711,7 +717,8 @@ function vPanel() {
     el.append(h('h3', { text: '辨識品質（第一次需下載）' }));
     chips(el, STT_MODELS, STT.model, v => { STT.model = v; saveSttPrefs(); });
   }
-  el.append(h('hr'), h('p', { text: '點時間軸上的片段可以修剪、變速、套濾鏡、加文字。按空白鍵播放或暫停。' }));
+  el = root;
+  el.append(h('p', { text: '點時間軸上的片段可以修剪、變速、套濾鏡、加文字。按空白鍵播放或暫停。' }));
 }
 
 // ── 匯出 ──
