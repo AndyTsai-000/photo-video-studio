@@ -388,7 +388,7 @@ function composeCut(src, iw, ih) {
   sx.globalCompositeOperation = 'destination-in';
   sx.imageSmoothingQuality = 'high';
   if (c.feather && HAS_FILTER) sx.filter = 'blur(' + (c.feather * Math.max(iw, ih) / 1500).toFixed(2) + 'px)';
-  sx.drawImage(c.mask, 0, 0, iw, ih);
+  sx.drawImage(c.shift ? shiftedMask(c, iw, ih) : c.mask, 0, 0, iw, ih);
   if (bg.type === 'color') { o.fillStyle = bg.color; o.fillRect(0, 0, iw, ih); }
   else if (bg.type === 'gradient') {
     const g = o.createLinearGradient(0, 0, 0, ih);
@@ -424,6 +424,20 @@ function cutToMask(p) {
   const c = P.cut, sc = c.scale || 1, cx = P.base.width / 2, cy = P.base.height / 2;
   return { x: (p.x - cx - (c.dx || 0)) / sc + cx, y: (p.y - cy - (c.dy || 0)) / sc + cy };
 }
+// 邊緣內縮／外擴：把遮罩糊開後重新定出邊界，內縮可以去掉主體外圍一圈殘留的背景色
+function shiftedMask(c, iw, ih) {
+  const m = c._shifted;
+  if (m && m.mask === c.mask && m.iw === iw && m.ih === ih && m.shift === c.shift) return m.cv;
+  const small = mk(iw, ih), sx = small.getContext('2d');
+  sx.imageSmoothingQuality = 'high';
+  sx.drawImage(c.mask, 0, 0, iw, ih);
+  const cv = blurCanvas(small, Math.max(1, Math.max(iw, ih) * 0.0016 * Math.abs(c.shift) + 0.6)), x = cv.getContext('2d');
+  const id = x.getImageData(0, 0, iw, ih), d = id.data, t = 0.5 + 0.42 * c.shift / 5;
+  for (let i = 3; i < d.length; i += 4) d[i] = clamp((d[i] / 255 - t) / 0.22 + 0.5, 0, 1) * 255;
+  x.putImageData(id, 0, 0);
+  c._shifted = { mask: c.mask, iw, ih, shift: c.shift, cv };
+  return cv;
+}
 async function runCutout() {
   const base = P.base;
   try {
@@ -431,7 +445,7 @@ async function runCutout() {
     if (P.base !== base) return;   // 等待期間照片被換掉或改過了
     pushHistory();
     const old = P.cut && P.cut.bg;
-    P.cut = { mask, feather: 1, dx: 0, dy: 0, scale: 1, bg: old ? { ...old } : { type: 'transparent', color: '#ffffff', color2: '#62d2c6', img: null, blur: 50 } };
+    P.cut = { mask, feather: 0.5, shift: 0, dx: 0, dy: 0, scale: 1, bg: old ? { ...old } : { type: 'transparent', color: '#ffffff', color2: '#62d2c6', img: null, blur: 50 } };
     showTool('cutout'); requestRender();
     toast('去背完成，可以在右邊換背景');
   } catch (e) { aiErrorToast(e); }
@@ -1256,6 +1270,7 @@ const PANELS = {
       slider(el, { label: '主體大小', min: 30, max: 250, value: Math.round((c.scale || 1) * 100), def: 100, fmt: v => v + '%', onStart: pushHistory, onInput: v => { c.scale = v / 100; redraw(); } });
       if (c.dx || c.dy || (c.scale || 1) !== 1) el.append(h('button', { class: 'btn wide', text: '主體放回原本的位置和大小', onclick: () => { pushHistory(); c.dx = c.dy = 0; c.scale = 1; showTool('cutout'); redraw(); } }));
     }
+    slider(el, { label: '邊緣內縮（去掉外圍殘留的背景色）', min: -5, max: 5, step: 0.5, value: c.shift || 0, def: 0, onStart: pushHistory, onInput: v => { c.shift = v; redraw(); } });
     slider(el, { label: '邊緣柔化', min: 0, max: 10, step: 0.5, value: c.feather, def: 1, onStart: pushHistory, onInput: v => { c.feather = v; redraw(); } });
     el = group(root, 'cut.edge', '修邊（去得不乾淨時用）');
     chips(el, [['', '不修'], ['maskAdd', '塗回主體'], ['maskErase', '擦掉多餘']], P.maskBrush, v => { P.maskBrush = v; showTool('cutout'); });

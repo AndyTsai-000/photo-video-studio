@@ -114,20 +114,130 @@ function aiErrorToast(e) {
 }
 $('#aiCancel').addEventListener('click', aiCancel);
 
-// 找出主體，回傳跟原圖一樣大的遮罩畫布（主體不透明、背景透明）
-async function aiMatte(src, model) {
+// ── 去背 ──
+// 模型一次只看得到長邊 1024 的縮圖，所以直接放大回原圖時邊緣會糊、細的地方會斷。精準度靠三件事補回來：
+//   1. 第二次分析：先找出主體大概在哪，把那一塊裁下來再分析一次，主體在模型眼中就變大、變清楚
+//   2. 邊緣貼合：拿原圖的明暗當參考，把放大後的邊緣修到真正的輪廓上（guided filter）
+//   3. 兩次結果差太多時（代表第二次看錯東西）退回第一次的結果
+// 跑一次模型：回傳縮圖尺寸的 alpha（0..1）和同尺寸的灰階圖
+async function matteOnce(src, model, label) {
   const s = Math.min(1, 1024 / Math.max(src.width, src.height));
   const c = mk(src.width * s, src.height * s), x = c.getContext('2d');
   x.imageSmoothingQuality = 'high';
   x.drawImage(src, 0, 0, c.width, c.height);
-  const id = x.getImageData(0, 0, c.width, c.height);
-  const m = await aiCall({ type: 'matte', model, data: id.data.buffer, w: c.width, h: c.height }, [id.data.buffer], '正在準備去背…');
-  const small = mk(m.w, m.h), md = new ImageData(m.w, m.h);
-  for (let i = 0; i < m.alpha.length; i++) { md.data[i * 4] = md.data[i * 4 + 1] = md.data[i * 4 + 2] = 255; md.data[i * 4 + 3] = m.alpha[i]; }
-  small.getContext('2d').putImageData(md, 0, 0);
-  const full = mk(src.width, src.height), fx = full.getContext('2d');
+  const id = x.getImageData(0, 0, c.width, c.height), d = id.data, w = c.width, hh = c.height, n = w * hh, gray = new Float32Array(n);
+  for (let i = 0; i < n; i++) gray[i] = (0.299 * d[i * 4] + 0.587 * d[i * 4 + 1] + 0.114 * d[i * 4 + 2]) / 255;
+  const m = await aiCall({ type: 'matte', model, data: d.buffer, w, h: hh }, [d.buffer], label);
+  const alpha = new Float32Array(n);
+  if (m.w === w && m.h === hh) for (let i = 0; i < n; i++) alpha[i] = m.alpha[i] / 255;
+  else for (let y = 0; y < hh; y++) for (let xx = 0; xx < w; xx++) alpha[y * w + xx] = m.alpha[Math.min(m.h - 1, Math.floor(y * m.h / hh)) * m.w + Math.min(m.w - 1, Math.floor(xx * m.w / w))] / 255;
+  return { alpha, gray, w, h: hh };
+}
+// 方框平均（先橫再直，各用累加，速度跟半徑無關）
+function boxMean(a, w, hh, r) {
+  const t = new Float32Array(a.length), out = new Float32Array(a.length);
+  for (let y = 0; y < hh; y++) {
+    const row = y * w;
+    let s = 0;
+    for (let x = 0; x <= Math.min(r, w - 1); x++) s += a[row + x];
+    for (let x = 0; x < w; x++) {
+      const lo = Math.max(0, x - r), hi = Math.min(w - 1, x + r);
+      t[row + x] = s / (hi - lo + 1);
+      if (x + r + 1 < w) s += a[row + x + r + 1];
+      if (x - r >= 0) s -= a[row + x - r];
+    }
+  }
+  for (let x = 0; x < w; x++) {
+    let s = 0;
+    for (let y = 0; y <= Math.min(r, hh - 1); y++) s += t[y * w + x];
+    for (let y = 0; y < hh; y++) {
+      const lo = Math.max(0, y - r), hi = Math.min(hh - 1, y + r);
+      out[y * w + x] = s / (hi - lo + 1);
+      if (y + r + 1 < hh) s += t[(y + r + 1) * w + x];
+      if (y - r >= 0) s -= t[(y - r) * w + x];
+    }
+  }
+  return out;
+}
+// 把縮圖尺寸的 alpha 放大成 region 畫布的大小，邊緣照 region 的明暗修到真正的輪廓上
+function refineMatte(lo, region) {
+  const { alpha: p, gray: I, w, h: hh } = lo, n = w * hh, r = Math.max(3, Math.round(Math.max(w, hh) / 150)), eps = 2e-4;
+  const II = new Float32Array(n), Ip = new Float32Array(n);
+  for (let i = 0; i < n; i++) { II[i] = I[i] * I[i]; Ip[i] = I[i] * p[i]; }
+  const mI = boxMean(I, w, hh, r), mp = boxMean(p, w, hh, r), mII = boxMean(II, w, hh, r), mIp = boxMean(Ip, w, hh, r);
+  const a = new Float32Array(n), b = new Float32Array(n);
+  for (let i = 0; i < n; i++) { a[i] = (mIp[i] - mI[i] * mp[i]) / (mII[i] - mI[i] * mI[i] + eps); b[i] = mp[i] - a[i] * mI[i]; }
+  const ma = boxMean(a, w, hh, r), mb = boxMean(b, w, hh, r);
+  const W = region.width, H = region.height, rd = region.getContext('2d').getImageData(0, 0, W, H).data;
+  const out = new ImageData(W, H), o = out.data, kx = w / W, ky = hh / H;
+  for (let y = 0; y < H; y++) {
+    const fy = Math.min(hh - 1.001, Math.max(0, (y + 0.5) * ky - 0.5)), y0 = Math.floor(fy), ty = fy - y0, r0 = y0 * w, r1 = r0 + w;
+    for (let x = 0; x < W; x++) {
+      const fx = Math.min(w - 1.001, Math.max(0, (x + 0.5) * kx - 0.5)), x0 = Math.floor(fx), tx = fx - x0;
+      const i00 = r0 + x0, i10 = i00 + 1, i01 = r1 + x0, i11 = i01 + 1, w00 = (1 - tx) * (1 - ty), w10 = tx * (1 - ty), w01 = (1 - tx) * ty, w11 = tx * ty;
+      const pv = p[i00] * w00 + p[i10] * w10 + p[i01] * w01 + p[i11] * w11;
+      const pb = mp[i00] * w00 + mp[i10] * w10 + mp[i01] * w01 + mp[i11] * w11;
+      const oi = (y * W + x) * 4;
+      let v = pv;
+      // 只在邊緣附近（主體和背景交界的那一圈）用原圖修正，主體內部和背景深處維持模型的判斷
+      const edge = Math.min(1, 6.4 * pb * (1 - pb));
+      if (edge > 0.01) {
+        const g = (0.299 * rd[oi] + 0.587 * rd[oi + 1] + 0.114 * rd[oi + 2]) / 255;
+        const q = (ma[i00] * w00 + ma[i10] * w10 + ma[i01] * w01 + ma[i11] * w11) * g + (mb[i00] * w00 + mb[i10] * w10 + mb[i01] * w01 + mb[i11] * w11);
+        v = pv + (q - pv) * edge;
+      }
+      o[oi] = o[oi + 1] = o[oi + 2] = 255;
+      o[oi + 3] = Math.min(1, Math.max(0, (v - 0.04) / 0.92)) * 255;
+    }
+  }
+  const cv = mk(W, H);
+  cv.getContext('2d').putImageData(out, 0, 0);
+  return cv;
+}
+// 找出主體，回傳跟原圖一樣大的遮罩畫布（主體不透明、背景透明）。opts.refine === false 時用最簡單的做法（測試比較用）
+async function aiMatte(src, model, opts) {
+  const W = src.width, H = src.height, first = await matteOnce(src, model, '正在準備去背…');
+  const full = mk(W, H), fx = full.getContext('2d');
   fx.imageSmoothingQuality = 'high';
-  fx.drawImage(small, 0, 0, full.width, full.height);
+  if (opts && opts.refine === false) {
+    const small = mk(first.w, first.h), md = new ImageData(first.w, first.h);
+    for (let i = 0; i < first.alpha.length; i++) { md.data[i * 4] = md.data[i * 4 + 1] = md.data[i * 4 + 2] = 255; md.data[i * 4 + 3] = first.alpha[i] * 255; }
+    small.getContext('2d').putImageData(md, 0, 0);
+    fx.drawImage(small, 0, 0, W, H);
+    return full;
+  }
+  // 主體的範圍（縮圖座標）
+  let x0 = first.w, y0 = first.h, x1 = -1, y1 = -1;
+  for (let y = 0; y < first.h; y++) for (let x = 0; x < first.w; x++) {
+    if (first.alpha[y * first.w + x] > 0.5) { if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; }
+  }
+  let lo = first, box = { x: 0, y: 0, w: W, h: H };
+  if (x1 >= 0) {
+    const k = W / first.w, pad = Math.max(x1 - x0, y1 - y0) * 0.09 + 4;
+    const bx = Math.max(0, Math.floor((x0 - pad) * k)), by = Math.max(0, Math.floor((y0 - pad) * k));
+    const bw = Math.min(W, Math.ceil((x1 + 1 + pad) * k)) - bx, bh = Math.min(H, Math.ceil((y1 + 1 + pad) * k)) - by;
+    // 主體只佔畫面一部分時才值得再看一次
+    if (bw > 32 && bh > 32 && bw * bh < 0.62 * W * H) {
+      const crop = mk(bw, bh);
+      crop.getContext('2d').drawImage(src, bx, by, bw, bh, 0, 0, bw, bh);
+      const second = await matteOnce(crop, model, '正在精修邊緣…（放大主體再分析一次）');
+      // 兩次的結果重疊夠多才採用第二次；差太多代表第二次看錯了東西
+      let inter = 0, uni = 0;
+      for (let y = 0; y < second.h; y += 2) for (let x = 0; x < second.w; x += 2) {
+        const a2 = second.alpha[y * second.w + x] > 0.5;
+        const fxp = Math.min(first.w - 1, Math.floor((bx + (x + 0.5) * bw / second.w) / k)), fyp = Math.min(first.h - 1, Math.floor((by + (y + 0.5) * bh / second.h) / k));
+        const a1 = first.alpha[fyp * first.w + fxp] > 0.5;
+        if (a1 && a2) inter++;
+        if (a1 || a2) uni++;
+      }
+      if (uni && inter / uni > 0.6) { lo = second; box = { x: bx, y: by, w: bw, h: bh }; }
+    }
+  }
+  // 邊緣貼合在最多長邊 3000 的畫布上做，夠細又不會太慢
+  const cap = Math.min(1, 3000 / Math.max(box.w, box.h)), region = mk(box.w * cap, box.h * cap), rx = region.getContext('2d');
+  rx.imageSmoothingQuality = 'high';
+  rx.drawImage(src, box.x, box.y, box.w, box.h, 0, 0, region.width, region.height);
+  fx.drawImage(refineMatte(lo, region), box.x, box.y, box.w, box.h);
   return full;
 }
 
