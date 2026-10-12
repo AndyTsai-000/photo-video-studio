@@ -44,11 +44,25 @@ function currentLayout() {
   const list = layoutList();
   return list[C.layout % list.length];
 }
+// 長圖拼接：每張照片保持原本比例，直的一張接一張（或橫的一張接一張）
+function isStitch() { return (C.ratio === 'v' || C.ratio === 'h') && C.imgs.length > 0; }
+function stitchLayout(L) {
+  const g = L * C.gap / 100, inner = L - 2 * g, rects = [];
+  let pos = g;
+  for (const it of C.imgs.slice(0, 9)) {
+    if (C.ratio === 'v') { const hh = inner * it.cv.height / it.cv.width; rects.push({ x: g, y: pos, w: inner, h: hh }); pos += hh + g; }
+    else { const w = inner * it.cv.width / it.cv.height; rects.push({ x: pos, y: g, w, h: inner }); pos += w + g; }
+  }
+  return C.ratio === 'v' ? { W: L, H: Math.round(pos), rects } : { W: Math.round(pos), H: L, rects };
+}
 function collageSize() {
+  if (isStitch()) { const st = stitchLayout(1600); return [st.W, st.H]; }
+  if (!RATIOS[C.ratio]) return [COLLAGE_SIDE, COLLAGE_SIDE];
   const [a, b] = RATIOS[C.ratio], s = COLLAGE_SIDE / Math.max(a, b);
   return [Math.round(a * s), Math.round(b * s)];
 }
 function cellRects(W, H) {
+  if (isStitch()) return stitchLayout(C.ratio === 'v' ? W : H).rects;
   const gap = Math.min(W, H) * C.gap / 100;
   return currentLayout().map(([x, y, w, hh]) => ({
     x: gap + x * (W - gap), y: gap + y * (H - gap), w: w * (W - gap) - gap, h: hh * (H - gap) - gap
@@ -59,6 +73,8 @@ function drawnSize(it, r) {
   return [it.cv.width * s, it.cv.height * s];
 }
 function renderCollage(target, scale, final) {
+  // 長圖可能非常長，超過瀏覽器畫布上限前先縮小
+  { const [w0, h0] = collageSize(); scale *= Math.min(1, 14000 / Math.max(w0 * scale, h0 * scale)); }
   const [W0, H0] = collageSize(), W = Math.round(W0 * scale), H = Math.round(H0 * scale);
   if (target.width !== W || target.height !== H) { target.width = W; target.height = H; }
   const ctx = target.getContext('2d');
@@ -196,14 +212,16 @@ function collagePanel() {
   el.append(h('button', { class: 'btn primary wide', text: '加入圖片（最多 9 張）', onclick: async () => addCollageFiles(await pickFiles($('#fileImgs'))) }));
   if (!C.imgs.length) { el.append(h('p', { text: '先選照片。選了幾張，這裡就會出現那個張數可以用的版型。' })); return; }
 
-  el.append(h('h3', { text: C.imgs.length + ' 張照片的版型' }));
+  const layHead = h('h3', { text: C.imgs.length + ' 張照片的版型' });
+  el.append(layHead);
   const lay = h('div', { class: 'layouts' });
   layoutList().forEach((rects, i) => {
     lay.append(h('button', { 'aria-pressed': String(i === C.layout), 'aria-label': '版型 ' + (i + 1), onclick: () => { C.layout = i; collagePanel(); drawCollage(); } }, layoutIcon(rects)));
   });
   el.append(lay);
+  if (isStitch()) { layHead.hidden = lay.hidden = true; el.append(h('p', { text: '長圖拼接會讓每張照片保持原本的比例，依序接起來，適合拼對話截圖或步驟圖。' })); }
   el.append(h('h3', { text: '畫布比例' }));
-  chips(el, Object.keys(RATIOS).map(k => [k, k]), C.ratio, v => { C.ratio = v; drawCollage(); });
+  chips(el, Object.keys(RATIOS).map(k => [k, k]).concat([['v', '直向長圖'], ['h', '橫向長圖']]), C.ratio, v => { C.ratio = v; collagePanel(); drawCollage(); });
   slider(el, { label: '間距', min: 0, max: 8, step: 0.5, value: C.gap, def: 2, onInput: v => { C.gap = v; drawCollage(); } });
   slider(el, { label: '圓角', min: 0, max: 12, step: 0.5, value: C.radius, def: 2, onInput: v => { C.radius = v; drawCollage(); } });
   el.append(h('h3', { text: '底色' }));

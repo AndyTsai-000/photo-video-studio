@@ -48,11 +48,11 @@ function cloneCanvas(src) {
 }
 
 // 讓畫布在舞台裡等比例縮到最大
-function fit(canvas) {
+function fit(canvas, zoom) {
   const wrap = canvas.parentElement, box = wrap.parentElement;
   const bw = box.clientWidth - 24, bh = box.clientHeight - 24;
   if (bw <= 0 || bh <= 0) return;
-  const s = Math.min(bw / canvas.width, bh / canvas.height);
+  const s = Math.min(bw / canvas.width, bh / canvas.height) * (zoom || 1);
   wrap.style.width = Math.floor(canvas.width * s) + 'px';
   wrap.style.height = Math.floor(canvas.height * s) + 'px';
 }

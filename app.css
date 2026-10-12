@@ -102,7 +102,11 @@ select {
 .tools button[aria-pressed="true"] { background: var(--raised); color: var(--accent); font-weight: 700; }
 
 .stage { display: grid; grid-template-rows: minmax(0, 1fr) auto; min-width: 0; min-height: 0; }
-.fitbox { display: grid; place-items: center; min-width: 0; min-height: 0; overflow: hidden; }
+/* 用 margin:auto 置中：內容放大超出時，四邊都還捲得到 */
+.fitbox { display: flex; min-width: 0; min-height: 0; overflow: hidden; }
+.fitbox > * { margin: auto; flex: none; }
+#photo .fitbox { overflow: auto; }
+.zoom-ctl { display: inline-flex; align-items: center; gap: 6px; margin-left: auto; font-variant-numeric: tabular-nums; }
 .empty { display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 24px 16px; text-align: center; color: var(--muted); }
 .empty strong { font-size: 20px; color: var(--fg); }
 .canvas-wrap { position: relative; box-shadow: 0 8px 30px rgba(0, 0, 0, .45); }
@@ -216,6 +220,16 @@ input[type="color"] { width: 34px; height: 28px; padding: 0; border: 1px solid v
 .stt-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 6px 16px; background: var(--raised); font-size: 13px; }
 .stt-bar .progress { flex: 1; min-width: 80px; }
 #sttProgress { height: 100%; width: 0; background: var(--cool); }
+.ai-bar {
+  position: fixed; left: 50%; top: calc(64px + env(safe-area-inset-top, 0px)); transform: translateX(-50%); z-index: 25;
+  display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 10px 14px; width: min(520px, calc(100% - 32px));
+  background: var(--raised); border: 1px solid var(--cool); border-radius: 12px; font-size: 13px; box-shadow: 0 8px 30px rgba(0, 0, 0, .5);
+}
+.ai-bar span { flex: 1 1 100%; }
+.ai-bar .progress { flex: 1; min-width: 80px; }
+#aiProgress { height: 100%; width: 0; background: var(--cool); }
+/* 透明背景用棋盤格表示 */
+#pv { background: repeating-conic-gradient(#cfcad6 0 25%, #f4f1f7 0 50%) 0 0 / 20px 20px; }
 .mbar { background: #6b5bd6; color: var(--fg); line-height: 18px; left: 0; }
 .playhead { position: absolute; top: 0; bottom: 0; left: 0; width: 2px; background: var(--accent); pointer-events: none; }
 .playhead::before { content: ""; position: absolute; top: 0; left: -5px; border: 6px solid transparent; border-top-color: var(--accent); }

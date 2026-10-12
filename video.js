@@ -71,6 +71,44 @@ function clipFilter(c) {
   if (c.s) s += ' saturate(' + (1 + c.s / 100) + ')';
   return { css: s.trim() || 'none', overlay: preset[3] };
 }
+const V_TRANS = [['none', '無'], ['fade', '淡化'], ['slide', '滑入'], ['push', '推移'], ['zoom', '放大'], ['wipe', '擦除']];
+const V_TEXT_ANIM = [['fade', '淡入'], ['up', '上滑'], ['pop', '彈出'], ['type', '打字'], ['none', '無']];
+const TRANS_DUR = 0.6;
+const easeOut = p => 1 - Math.pow(1 - p, 3);
+// 把一個片段在某個時間點的畫面畫到 ctx：含濾鏡、旋轉、緩慢推近、暗角
+function drawClip(ctx, c, local, W, H) {
+  const sw = c.kind === 'video' ? c.el.videoWidth : c.el.width, sh = c.kind === 'video' ? c.el.videoHeight : c.el.height;
+  if (!sw || !sh) return;
+  const turned = c.rot % 180 !== 0, rw = turned ? sh : sw, rh = turned ? sw : sh;
+  const cover = Math.max(W / rw, H / rh), contain = Math.min(W / rw, H / rh);
+  const f = clipFilter(c), d = clipDur(c), prog = d > 0 ? clamp(local / d, 0, 1) : 0;
+  const kb = c.kb === 'in' ? 1 + 0.18 * prog : c.kb === 'out' ? 1.18 - 0.18 * prog : 1;
+  const put = (sc, css, overlay) => {
+    const dw = sw * sc, dh = sh * sc;
+    ctx.save();
+    ctx.translate(W / 2, H / 2); ctx.rotate(c.rot * Math.PI / 180); ctx.scale(c.flip ? -1 : 1, 1);
+    if (HAS_FILTER) ctx.filter = css;
+    ctx.drawImage(c.el, -dw / 2, -dh / 2, dw, dh);
+    ctx.filter = 'none';
+    if (overlay) {
+      ctx.globalCompositeOperation = 'soft-light';
+      ctx.fillStyle = overlay;
+      ctx.fillRect(-dw / 2, -dh / 2, dw, dh);
+    }
+    ctx.restore();
+  };
+  ctx.save();
+  if (c.fade) ctx.globalAlpha = clamp(Math.min(local, d - local) / Math.min(0.5, d / 2), 0, 1);
+  // 模糊背景：先鋪一層放大、模糊的同一個畫面，再把完整畫面疊上去
+  if (c.fit === 'blur') put(cover * 1.1, (f.css === 'none' ? '' : f.css + ' ') + 'blur(' + Math.round(H / 30) + 'px) brightness(.65)', null);
+  put((c.fit === 'cover' ? cover : contain) * c.zoom * kb, f.css, f.overlay);
+  if (c.vig) {
+    const diag = Math.hypot(W, H) / 2, g = ctx.createRadialGradient(W / 2, H / 2, diag * 0.45, W / 2, H / 2, diag);
+    g.addColorStop(0, 'rgba(0,0,0,0)'); g.addColorStop(1, 'rgba(0,0,0,' + (c.vig / 100 * 0.85) + ')');
+    ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+  }
+  ctx.restore();
+}
 function drawFrame() {
   const W = VC.width, H = VC.height, total = totalDur();
   const L = locate(Math.min(V.t, Math.max(0, total - 0.001)));
@@ -79,41 +117,38 @@ function drawFrame() {
   vctx.fillStyle = '#000000';
   vctx.fillRect(0, 0, W, H);
   if (c) {
-    const sw = c.kind === 'video' ? c.el.videoWidth : c.el.width, sh = c.kind === 'video' ? c.el.videoHeight : c.el.height;
-    if (sw && sh) {
-      const turned = c.rot % 180 !== 0, rw = turned ? sh : sw, rh = turned ? sw : sh;
-      const cover = Math.max(W / rw, H / rh), contain = Math.min(W / rw, H / rh);
-      const f = clipFilter(c), d = clipDur(c);
-      const put = (sc, css, overlay) => {
-        const dw = sw * sc, dh = sh * sc;
-        vctx.save();
-        vctx.translate(W / 2, H / 2); vctx.rotate(c.rot * Math.PI / 180); vctx.scale(c.flip ? -1 : 1, 1);
-        if (HAS_FILTER) vctx.filter = css;
-        vctx.drawImage(c.el, -dw / 2, -dh / 2, dw, dh);
-        vctx.filter = 'none';
-        if (overlay) {
-          vctx.globalCompositeOperation = 'soft-light';
-          vctx.fillStyle = overlay;
-          vctx.fillRect(-dw / 2, -dh / 2, dw, dh);
-        }
-        vctx.restore();
-      };
+    // 轉場：播放到新片段時，用上一段的最後一格和新片段做過場
+    const T = Math.min(TRANS_DUR, clipDur(c) / 2);
+    const tr = c.trans && c.trans !== 'none' && V.prevFrame && V.prevFor === c.id && L.local < T ? c.trans : null;
+    if (!tr) drawClip(vctx, c, L.local, W, H);
+    else {
+      if (!V.layer || V.layer.width !== W || V.layer.height !== H) V.layer = mk(W, H);
+      const lx = V.layer.getContext('2d'), p = easeOut(L.local / T), prev = V.prevFrame;
+      lx.fillStyle = '#000000'; lx.fillRect(0, 0, W, H);
+      drawClip(lx, c, L.local, W, H);
       vctx.save();
-      if (c.fade) vctx.globalAlpha = clamp(Math.min(L.local, d - L.local) / Math.min(0.5, d / 2), 0, 1);
-      // 模糊背景：先鋪一層放大、模糊的同一個畫面，再把完整畫面疊上去
-      if (c.fit === 'blur') put(cover * 1.1, (f.css === 'none' ? '' : f.css + ' ') + 'blur(' + Math.round(H / 30) + 'px) brightness(.65)', null);
-      put((c.fit === 'cover' ? cover : contain) * c.zoom, f.css, f.overlay);
+      vctx.drawImage(prev, tr === 'push' ? -W * p : 0, 0, W, H);
+      if (tr === 'fade') { vctx.globalAlpha = p; vctx.drawImage(V.layer, 0, 0); }
+      else if (tr === 'slide' || tr === 'push') vctx.drawImage(V.layer, W * (1 - p), 0);
+      else if (tr === 'zoom') { const k = 0.6 + 0.4 * p; vctx.globalAlpha = p; vctx.drawImage(V.layer, (W - W * k) / 2, (H - H * k) / 2, W * k, H * k); }
+      else if (tr === 'wipe') { const ww = Math.max(1, W * p); vctx.drawImage(V.layer, 0, 0, ww, H, 0, 0, ww, H); }
       vctx.restore();
     }
   }
+  if (V.clean) return;   // 擷取畫面時不要文字和浮水印
   for (const tx of V.texts) {
     if (!c || tx.clip !== c.id) continue;
     const sp = textLocal(tx, c);
     if (!sp || L.local < sp.s || L.local > sp.e) continue;
-    const st = tx.auto ? c.cap : tx;
-    const a = tx.auto ? 1 : clamp(Math.min(L.local - sp.s, sp.e - L.local) / 0.25, 0, 1);
+    const st = tx.auto ? c.cap : tx, anim = tx.auto ? 'none' : (st.anim || 'fade');
+    const tin = clamp((L.local - sp.s) / 0.35, 0, 1), tout = clamp((sp.e - L.local) / 0.25, 0, 1), e = easeOut(tin);
+    const a = anim === 'none' ? 1 : Math.min(anim === 'type' ? 1 : tin, tout);
     const lines = tx.text.split('\n');
-    let size = H * st.size / 100;
+    let size = H * st.size / 100, shown = lines;
+    if (anim === 'type') {
+      const n = Math.ceil(tx.text.length * clamp((L.local - sp.s) / Math.max(0.3, (sp.e - sp.s) * 0.6), 0, 1));
+      shown = tx.text.slice(0, n).split('\n');
+    }
     vctx.save();
     const fam = FONTS[st.font || 'hei'][1];
     vctx.font = '700 ' + size + 'px ' + fam;
@@ -121,8 +156,9 @@ function drawFrame() {
     if (widest > W * 0.92) { size *= W * 0.92 / widest; vctx.font = '700 ' + size + 'px ' + fam; }
     vctx.globalAlpha = a; vctx.textAlign = 'center'; vctx.textBaseline = 'middle';
     vctx.lineJoin = 'round'; vctx.lineWidth = size * 0.16; vctx.strokeStyle = 'rgba(0,0,0,.85)'; vctx.fillStyle = st.color;
-    const cy = H * (st.pos === 'top' ? 0.14 : st.pos === 'middle' ? 0.5 : 0.86);
-    lines.forEach((l, i) => {
+    const cy = H * (st.pos === 'top' ? 0.14 : st.pos === 'middle' ? 0.5 : 0.86) + (anim === 'up' ? (1 - e) * size * 0.9 : 0);
+    if (anim === 'pop') { const k = 0.6 + 0.4 * e; vctx.translate(W / 2, cy); vctx.scale(k, k); vctx.translate(-W / 2, -cy); }
+    shown.forEach((l, i) => {
       const y = cy + (i - (lines.length - 1) / 2) * size * 1.25;
       if (st.bg) {
         const tw = vctx.measureText(l).width + size * 0.7;
@@ -132,6 +168,14 @@ function drawFrame() {
       } else vctx.strokeText(l, W / 2, y);
       vctx.fillText(l, W / 2, y);
     });
+    vctx.restore();
+  }
+  if (V.mark) {
+    const m = V.mark, w = W * m.size / 100, hh = w * m.cv.height / m.cv.width, pad = W * 0.03;
+    vctx.save();
+    vctx.globalAlpha = m.alpha;
+    vctx.imageSmoothingQuality = 'high';
+    vctx.drawImage(m.cv, m.pos[1] === 'r' ? W - w - pad : pad, m.pos[0] === 'b' ? H - hh - pad : pad, w, hh);
     vctx.restore();
   }
 }
@@ -221,6 +265,9 @@ function tick(now) {
     else if (m.fadeOut) setGain(m.el, m.vol * clamp((total - V.t) / 2, 0, 1));
   }
   if (V.t >= total) { finishPlayback(total); return; }
+  // 這一格要跨到下一段、而且下一段有設轉場：畫布上還是這一段的最後一格，先留下來做過場
+  const nx = V.clips[L.idx + 1];
+  if (nx && nx.trans && nx.trans !== 'none' && V.t >= L.start + clipDur(c)) { V.prevFrame = cloneCanvas(VC); V.prevFor = nx.id; }
   drawFrame(); updatePlayhead();
   requestAnimationFrame(tick);
 }
@@ -232,6 +279,7 @@ function finishPlayback(total) {
 }
 function seek(t) {
   V.t = clamp(t, 0, totalDur());
+  V.prevFor = null;
   if (V.playing) { V.active = null; syncMusic(); }
   else {
     const L = locate(Math.min(V.t, Math.max(0, totalDur() - 0.001)));
@@ -258,7 +306,7 @@ function thumbOf(src, sw, sh) {
   try { return c.toDataURL('image/jpeg', 0.6); } catch (e) { return ''; }
 }
 function newClip(kind, el, name, dur, thumb) {
-  return { id: ++vid, kind, el, name, srcDur: dur, in: 0, out: dur, speed: 1, vol: 1, filter: 'none', b: 0, c: 0, s: 0, fit: 'cover', rot: 0, flip: false, zoom: 1, fade: false, thumb, file: null, capOn: true, cap: { pos: 'bottom', size: 6, color: '#ffffff' } };
+  return { id: ++vid, kind, el, name, srcDur: dur, in: 0, out: dur, speed: 1, vol: 1, filter: 'none', b: 0, c: 0, s: 0, fit: 'cover', rot: 0, flip: false, zoom: 1, fade: false, trans: 'none', kb: 'none', vig: 0, thumb, file: null, capOn: true, cap: { pos: 'bottom', size: 6, color: '#ffffff' } };
 }
 async function addVideoFile(f) {
   const v = document.createElement('video');
@@ -358,6 +406,46 @@ function updatePlayhead() {
     if (x > sc.scrollLeft + sc.clientWidth - 60 || x < sc.scrollLeft) sc.scrollLeft = Math.max(0, x - 80);
   }
 }
+// 在播放頭把片段切成兩段；切成功回傳 true。quiet 時切不了也不跳提示
+function splitAtPlayhead(quiet) {
+  pause();
+  const L = locate(V.t), c = L.clip;
+  if (!c || L.local < 0.1 || clipDur(c) - L.local < 0.1) { if (!quiet) toast('把播放頭移到片段中間再分割'); return false; }
+  const a = { ...c, id: ++vid }, b = { ...c, id: ++vid };
+  a.cap = { ...c.cap }; b.cap = { ...c.cap };
+  b.trans = 'none';   // 同一段切開的後半不需要轉場
+  const cutAt = c.kind === 'video' ? c.in + L.local * c.speed : L.local;
+  if (c.kind === 'video') { a.out = b.in = cutAt; }
+  else { a.out = L.local; b.out = c.out - L.local; }
+  // 文字依切點分給前後兩段
+  for (const tx of V.texts) {
+    if (tx.clip !== c.id) continue;
+    if (tx.at < cutAt) tx.clip = a.id;
+    else { tx.clip = b.id; if (c.kind !== 'video') tx.at -= cutAt; }
+  }
+  V.clips.splice(L.idx, 1, a, b);
+  V.sel = b.id; V.selText = null;
+  rebuildTL(); vPanel(); seek(V.t);
+  return true;
+}
+// 定格：把播放頭這一格變成一張 2 秒的靜止畫面插進去
+function addFreezeFrame() {
+  if (!V.clips.length) { toast('先加入影片或圖片'); return; }
+  pause();
+  V.clean = true; V.res = 1080; setVideoSize();
+  const shot = cloneCanvas(VC);
+  V.clean = false; V.res = 720; setVideoSize();
+  const L0 = locate(Math.min(V.t, Math.max(0, totalDur() - 0.001)));
+  let idx;
+  if (splitAtPlayhead(true)) idx = V.clips.findIndex(c => c.id === V.sel);
+  else idx = L0.idx + (L0.local > clipDur(L0.clip) / 2 ? 1 : 0);
+  const fr = newClip('image', shot, '定格畫面', 2, thumbOf(shot, shot.width, shot.height));
+  V.clips.splice(idx, 0, fr);
+  V.sel = fr.id; V.selText = null;
+  rebuildTL(); vPanel(); seek(clipStart(fr) + 0.05);
+  vCommit();
+  toast('已插入 2 秒定格畫面，長度可以在右邊調整');
+}
 (function wireTimeline() {
   const inner = $('#tlInner');
   let scrubbing = false;
@@ -380,25 +468,7 @@ function updatePlayhead() {
 
   const selClip = () => V.clips.find(c => c.id === V.sel);
   const after = () => { rebuildTL(); vPanel(); seek(V.t); };
-  $('#splitBtn').addEventListener('click', () => {
-    pause();
-    const L = locate(V.t), c = L.clip;
-    if (!c || L.local < 0.1 || clipDur(c) - L.local < 0.1) { toast('把播放頭移到片段中間再分割'); return; }
-    const a = { ...c, id: ++vid }, b = { ...c, id: ++vid };
-    a.cap = { ...c.cap }; b.cap = { ...c.cap };
-    const cut = c.kind === 'video' ? c.in + L.local * c.speed : L.local;
-    if (c.kind === 'video') { a.out = b.in = cut; }
-    else { a.out = L.local; b.out = c.out - L.local; }
-    // 文字依切點分給前後兩段
-    for (const tx of V.texts) {
-      if (tx.clip !== c.id) continue;
-      if (tx.at < cut) tx.clip = a.id;
-      else { tx.clip = b.id; if (c.kind !== 'video') tx.at -= cut; }
-    }
-    V.clips.splice(L.idx, 1, a, b);
-    V.sel = b.id; V.selText = null;
-    after();
-  });
+  $('#splitBtn').addEventListener('click', () => splitAtPlayhead(false));
   $('#dupBtn').addEventListener('click', () => {
     const c = selClip();
     if (!c) { toast('先在時間軸上點選一個片段'); return; }
@@ -470,11 +540,17 @@ function vPanel() {
           h('button', { class: 'btn danger', text: '刪除字幕', onclick: () => { V.texts = V.texts.filter(t => !(t.clip === clip.id && t.auto)); refresh(); vPanel(); } })));
       } else el.append(h('button', { class: 'btn wide', text: '聽聲音自動產生字幕', onclick: () => queueCaptions(clip) }));
     }
+    el.append(h('h3', { text: '轉場（從上一段進到這一段）' }));
+    if (V.clips[0] === clip) el.append(h('p', { text: '第一個片段前面沒有畫面，不需要轉場。' }));
+    else chips(el, V_TRANS, clip.trans || 'none', v => { clip.trans = v; });
+    el.append(h('h3', { text: '鏡頭' }));
+    chips(el, [['none', '不動'], ['in', '緩慢推近'], ['out', '緩慢拉遠']], clip.kb || 'none', v => { clip.kb = v; drawFrame(); });
     el.append(h('h3', { text: '濾鏡' }));
     chips(el, V_FILTERS.map(f => [f[0], f[1]]), clip.filter, v => { clip.filter = v; drawFrame(); });
     for (const [k, label] of [['b', '亮度'], ['c', '對比'], ['s', '飽和度']]) {
       slider(el, { label, min: -100, max: 100, value: clip[k], def: 0, onInput: v => { clip[k] = v; drawFrame(); } });
     }
+    slider(el, { label: '暗角', min: 0, max: 100, value: clip.vig || 0, def: 0, onInput: v => { clip.vig = v; drawFrame(); } });
     el.append(h('h3', { text: '畫面' }));
     chips(el, [['cover', '填滿畫面'], ['contain', '完整顯示'], ['blur', '模糊背景']], clip.fit, v => { clip.fit = v; drawFrame(); });
     el.append(h('div', { class: 'chips' },
@@ -505,6 +581,10 @@ function vPanel() {
       st.font = v; drawFrame();
       if (document.fonts && document.fonts.load) document.fonts.load('700 40px ' + FONTS[v][1], text.text).then(drawFrame, () => {});
     });
+    if (!text.auto) {
+      el.append(h('h3', { text: '出現動畫' }));
+      chips(el, V_TEXT_ANIM, st.anim || 'fade', v => { st.anim = v; seek(clipStart(owner) + clamp((text.at - base) / k, 0, clipDur(owner)) + 0.02); });
+    }
     el.append(h('button', { class: 'btn wide', 'aria-pressed': String(!!st.bg), text: '黑色底條（取代描邊）', onclick: () => { st.bg = !st.bg; vPanel(); drawFrame(); } }));
     slider(el, { label: '大小', min: 3, max: 20, step: 0.5, value: st.size, def: text.auto ? 6 : 7, onInput: v => { st.size = v; drawFrame(); } });
     el.append(h('button', { class: 'btn danger wide', text: text.auto ? '刪除這一句' : '刪除這段文字', onclick: deleteVideoSelection }));
@@ -543,6 +623,26 @@ function vPanel() {
   chips(el, [['16:9', '橫式 16:9'], ['9:16', '直式 9:16'], ['1:1', '方形 1:1'], ['4:5', '4:5']], V.aspect, v => { V.aspect = v; setVideoSize(); });
   el.append(h('hr'));
   el.append(h('button', { class: 'btn wide', text: '把目前畫面送到「修圖」', onclick: snapshotToPhoto }));
+  el.append(h('button', { class: 'btn wide', text: '在播放頭插入定格畫面', onclick: addFreezeFrame }));
+  el.append(h('hr'), h('h3', { text: '浮水印、Logo' }));
+  el.append(h('button', {
+    class: 'btn wide', text: V.mark ? '換一張浮水印圖片' : '加入浮水印圖片', onclick: async () => {
+      const [f] = await pickFiles($('#fileImg'));
+      if (!f) return;
+      try {
+        const cv = await fileToCanvas(f, 1200);
+        V.mark = { cv, pos: 'br', size: 16, alpha: 0.85, ...(V.mark ? { pos: V.mark.pos, size: V.mark.size, alpha: V.mark.alpha } : {}) };
+        vPanel(); drawFrame();
+      } catch (e) { toast('無法讀取 ' + f.name); }
+    }
+  }));
+  if (V.mark) {
+    const m = V.mark;
+    chips(el, [['tl', '左上'], ['tr', '右上'], ['bl', '左下'], ['br', '右下']], m.pos, v => { m.pos = v; drawFrame(); });
+    slider(el, { label: '浮水印大小', min: 5, max: 50, value: m.size, def: 16, fmt: v => v + '%', onInput: v => { m.size = v; drawFrame(); } });
+    slider(el, { label: '不透明度', min: 10, max: 100, value: Math.round(m.alpha * 100), def: 85, fmt: v => v + '%', onInput: v => { m.alpha = v / 100; drawFrame(); } });
+    el.append(h('button', { class: 'btn danger wide', text: '移除浮水印', onclick: () => { V.mark = null; vPanel(); drawFrame(); } }));
+  }
   if (V.texts.length) el.append(h('button', { class: 'btn wide', text: '匯出字幕檔（SRT）', onclick: exportSrt }));
   el.append(h('hr'), h('h3', { text: '自動字幕' }));
   el.append(h('button', {
@@ -644,7 +744,7 @@ function vState() {
   return { clips: V.clips.map(c => ({ ...c, cap: { ...c.cap } })), texts: V.texts.map(t => ({ ...t })), aspect: V.aspect };
 }
 function vKey() {
-  return JSON.stringify([V.clips.map(c => [c.id, c.in, c.out, c.speed, c.vol, c.filter, c.b, c.c, c.s, c.fit, c.rot, c.flip, c.zoom, c.fade, c.capOn, c.cap]), V.texts, V.aspect]);
+  return JSON.stringify([V.clips.map(c => [c.id, c.in, c.out, c.speed, c.vol, c.filter, c.b, c.c, c.s, c.fit, c.rot, c.flip, c.zoom, c.fade, c.trans, c.kb, c.vig, c.capOn, c.cap]), V.texts, V.aspect]);
 }
 function vCommit() {
   const k = vKey();

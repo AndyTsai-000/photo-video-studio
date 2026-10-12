@@ -35,7 +35,7 @@ function setMode(mode) {
 }
 function refit() {
   if (MODE === 'home') return;
-  if (MODE === 'photo') { fit(PV); syncCropBox(); }
+  if (MODE === 'photo') { fit(PV, P.zoom); syncCropBox(); }
   else if (MODE === 'collage') drawCollage();
   else { fit(VC); rebuildTL(); drawFrame(); }
 }
