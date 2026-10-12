@@ -46,16 +46,16 @@ const FONTS = {
 };
 const STICKERS = ['❤️', '⭐', '✨', '🔥', '🌸', '🎀', '👑', '😎', '😍', '🥰', '😂', '🤩', '🎉', '🎈', '🌈', '☀️', '🌙', '☁️', '🍀', '🐱', '🐶', '🦋', '💬', '💯', '👍', '✌️', '🎂', '☕', '🍓', '📍', '🎵', '💡'];
 const EMOJI_FONT = '"Segoe UI Emoji","Apple Color Emoji","Noto Color Emoji",sans-serif';
-const PHOTO_TOOLS = [['adjust', '調整'], ['filter', '濾鏡'], ['beauty', '美顏'], ['crop', '裁切'], ['text', '文字'], ['sticker', '貼圖'], ['brush', '畫筆'], ['frame', '邊框']];
+const PHOTO_TOOLS = [['adjust', '調整'], ['filter', '濾鏡'], ['beauty', '美顏'], ['retouch', '細修'], ['crop', '裁切'], ['text', '文字'], ['sticker', '貼圖'], ['brush', '畫筆'], ['frame', '邊框']];
 
 const P = {
   base: null, paint: null, objects: [], sel: null,
   adj: {}, preset: 'none', presetAmt: 100,
   beauty: { smooth: 0, whiten: 0, rosy: 0 },
-  frame: { type: 'none', color: '#ffffff', size: 5 },
+  frame: { type: 'none', color: '#ffffff', color2: '#ff5d8f', size: 5 },
   tool: 'adjust', hist: [], redo: [], open: { light: true, color: true, quality: true, fx: true },
   crop: { x: 0, y: 0, w: 1, h: 1 }, cropRatio: 0,
-  brushMode: 'doodle', brushColor: '#ff5d8f', brushSize: { doodle: 30, mosaic: 40, erase: 40, liquify: 45 },
+  brushMode: 'doodle', brushColor: '#ff5d8f', brushSize: { doodle: 30, mosaic: 40, erase: 40, liquify: 45, retouch: 35 },
   liqOn: false, liqStrength: 50, compare: false
 };
 function resetAdj() { for (const [k] of ADJ) P.adj[k] = 0; }
@@ -112,7 +112,7 @@ function setPhotoImage(src) {
   P.objects = []; P.sel = null;
   resetAdj(); P.preset = 'none'; P.presetAmt = 100;
   P.beauty = { smooth: 0, whiten: 0, rosy: 0 };
-  P.frame = { type: 'none', color: '#ffffff', size: 5 };
+  P.frame = { type: 'none', color: '#ffffff', color2: '#ff5d8f', size: 5 };
   P.crop = { x: 0, y: 0, w: 1, h: 1 };
   P.hist = []; P.redo = [];
   syncHistButtons();
@@ -261,7 +261,66 @@ function frameInsets(final) {
   const f = P.frame;
   if (f.type === 'none' || (!final && P.tool === 'crop')) return { l: 0, t: 0, r: 0, b: 0 };
   const s = Math.round(Math.min(P.base.width, P.base.height) * f.size / 100);
-  return { l: s, t: s, r: s, b: f.type === 'polaroid' ? Math.round(s * 3.6) : s };
+  if (f.type === 'polaroid') return { l: s, t: s, r: s, b: Math.round(s * 3.6) };
+  if (f.type === 'film') { const band = Math.round(s * 2.2); return { l: s, t: band, r: s, b: band }; }
+  return { l: s, t: s, r: s, b: s };
+}
+
+// 邊框上的線條、齒孔用跟底色相反的深淺，才看得見
+function contrastOf(hex) {
+  const n = parseInt(hex.slice(1), 16), lum = 0.299 * (n >> 16) + 0.587 * ((n >> 8) & 255) + 0.114 * (n & 255);
+  return lum > 140 ? '#1a1a1a' : '#ffffff';
+}
+// 畫出邊框和照片。b 是左右邊框寬度、bt 是上方邊框高度（都已換算成輸出像素）
+function drawFramed(ctx, wc, W, H, ix, iy, iw, ih, b, bt) {
+  const f = P.frame, ink = contrastOf(f.color);
+  if (f.type === 'gradient') {
+    const g = ctx.createLinearGradient(0, 0, W, H);
+    g.addColorStop(0, f.color); g.addColorStop(1, f.color2 || '#ff5d8f');
+    ctx.fillStyle = g;
+  } else ctx.fillStyle = f.color;
+  ctx.fillRect(0, 0, W, H);
+  if (f.type === 'round' || f.type === 'circle') {
+    ctx.save();
+    if (f.type === 'round') roundRectPath(ctx, ix, iy, iw, ih, Math.min(iw, ih) * 0.08);
+    else { ctx.beginPath(); ctx.ellipse(ix + iw / 2, iy + ih / 2, iw / 2, ih / 2, 0, 0, Math.PI * 2); }
+    ctx.clip();
+    ctx.drawImage(wc, ix, iy);
+    ctx.restore();
+    return;
+  }
+  if (f.type === 'shadow') {
+    ctx.save();
+    ctx.shadowColor = 'rgba(0,0,0,.45)'; ctx.shadowBlur = b * 0.7; ctx.shadowOffsetY = b * 0.25;
+    ctx.fillStyle = '#000000'; ctx.fillRect(ix, iy, iw, ih);
+    ctx.restore();
+  }
+  ctx.drawImage(wc, ix, iy);
+  if (f.type === 'double') {
+    const lw = Math.max(1, b * 0.1), inset = b * 0.45;
+    ctx.lineWidth = lw; ctx.strokeStyle = ink;
+    ctx.strokeRect(inset, inset, W - inset * 2, H - inset * 2);
+  } else if (f.type === 'line') {
+    const lw = Math.max(1, b * 0.08);
+    ctx.lineWidth = lw; ctx.strokeStyle = ink;
+    ctx.strokeRect(ix - lw / 2, iy - lw / 2, iw + lw, ih + lw);
+  } else if (f.type === 'film') {
+    // 底片：上下兩排齒孔
+    const hw = bt * 0.38, hh = bt * 0.46, gap = hw * 0.9, n = Math.max(3, Math.floor((W - gap) / (hw + gap))), start = (W - (n * hw + (n - 1) * gap)) / 2;
+    ctx.fillStyle = ink;
+    for (let i = 0; i < n; i++) {
+      const x = start + i * (hw + gap);
+      roundRectPath(ctx, x, (bt - hh) / 2, hw, hh, hw * 0.2); ctx.fill();
+      roundRectPath(ctx, x, H - bt + (bt - hh) / 2, hw, hh, hw * 0.2); ctx.fill();
+    }
+  } else if (f.type === 'corner') {
+    // 相角：四個角落各一個 L 形
+    const len = b * 1.6, lw = Math.max(2, b * 0.14), o = b * 0.45;
+    ctx.lineWidth = lw; ctx.strokeStyle = ink; ctx.lineCap = 'square';
+    for (const [cx, cy, sx, sy] of [[o, o, 1, 1], [W - o, o, -1, 1], [o, H - o, 1, -1], [W - o, H - o, -1, -1]]) {
+      ctx.beginPath(); ctx.moveTo(cx + sx * len, cy); ctx.lineTo(cx, cy); ctx.lineTo(cx, cy + sy * len); ctx.stroke();
+    }
+  }
 }
 
 // ── 物件（文字、貼圖）──
@@ -379,12 +438,8 @@ function renderPhoto(target, maxSide, opts) {
   const ctx = target.getContext('2d');
   ctx.clearRect(0, 0, W, H);
   const ix = Math.round(ins.l * s), iy = Math.round(ins.t * s);
-  const framed = ins.l > 0;
-  if (framed) { ctx.fillStyle = P.frame.color; ctx.fillRect(0, 0, W, H); }
-  if (framed && P.frame.type === 'round') {
-    ctx.save(); roundRectPath(ctx, ix, iy, iw, ih, Math.min(iw, ih) * 0.08); ctx.clip();
-    ctx.drawImage(wc, ix, iy); ctx.restore();
-  } else ctx.drawImage(wc, ix, iy);
+  if (ins.l > 0) drawFramed(ctx, wc, W, H, ix, iy, iw, ih, Math.round(ins.l * s), Math.round(ins.t * s));
+  else ctx.drawImage(wc, ix, iy);
   if (opts.raw) return;
 
   ctx.save();
@@ -511,10 +566,11 @@ $('#cropBox').addEventListener('pointerdown', e0 => {
 // ── 筆刷：塗鴉、馬賽克、橡皮擦、瘦臉推移 ──
 function activeBrush() {
   if (P.tool === 'brush') return P.brushMode;
+  if (P.tool === 'retouch') return 'retouch';
   if (P.tool === 'beauty' && P.liqOn) return 'liquify';
   return null;
 }
-const BRUSH_RANGE = { doodle: [.004, .06], mosaic: [.015, .18], erase: [.015, .18], liquify: [.05, .4] };
+const BRUSH_RANGE = { doodle: [.004, .06], mosaic: [.015, .18], erase: [.015, .18], liquify: [.05, .4], retouch: [.02, .32] };
 function brushPx(br) {
   const [a, b] = BRUSH_RANGE[br], m = Math.min(P.base.width, P.base.height);
   return m * (a + (b - a) * P.brushSize[br] / 100);
@@ -530,6 +586,7 @@ function pixelate(src) {
 }
 let mosaicSrc = null;
 function startStroke(br, p) {
+  if (br === 'retouch') { retouchStart(p); return; }
   pushHistory();
   if (br === 'doodle' || br === 'erase') P.paint = cloneCanvas(P.paint);
   else {
@@ -539,6 +596,7 @@ function startStroke(br, p) {
   stroke(br, p, p);
 }
 function stroke(br, a, b) {
+  if (br === 'retouch') { retouchDab(a, b); return; }
   const d = brushPx(br);
   if (br === 'liquify') { warp(P.base, a, b, d / 2, P.liqStrength / 100); return; }
   const ctx = (br === 'mosaic' ? P.base : P.paint).getContext('2d');
@@ -579,6 +637,87 @@ function warp(cv, from, to, R, k) {
   ctx.putImageData(dst, x0, y0);
 }
 
+// ── 細修：用筆刷塗到哪裡，效果就只作用在哪裡 ──
+// 做法：下筆時先把整張圖算出「套用效果後」的版本，再依塗抹的範圍（遮罩）把它疊回原圖
+const RETOUCH_FX = [
+  ['brighten', '提亮', { exposure: .45 }], ['darken', '壓暗', { exposure: -.45 }],
+  ['vivid', '增豔', { saturation: .7 }], ['mute', '淡色', { saturation: -.85 }],
+  ['warm', '暖色', { temp: .9, tint: .1 }], ['cool', '冷色', { temp: -.9 }],
+  ['contrast', '加對比', { contrast: .5 }], ['blur', '模糊', null], ['sharpen', '銳化', null],
+  ['heal', '柔膚去斑', null], ['clone', '仿製（蓋掉雜物）', null]
+];
+const RT = { fx: 'brighten', strength: 60, src: null, picking: false, orig: null, fxCv: null, mask: null, tmp: null, box: null };
+function makeRetouchFx(src, p) {
+  const s = RT.strength / 100, w = src.width, hh = src.height, d = brushPx('retouch');
+  const onTop = layer => { const c = cloneCanvas(src); c.getContext('2d').drawImage(layer, 0, 0); return c; };
+  if (RT.fx === 'clone') {
+    const c = mk(w, hh), x = c.getContext('2d');
+    x.drawImage(src, 0, 0);
+    x.drawImage(src, p.x - RT.src.x, p.y - RT.src.y);
+    return c;
+  }
+  if (RT.fx === 'blur') return onTop(blurCanvas(src, Math.max(2, d * 0.15 * (0.3 + s))));
+  if (RT.fx === 'heal') return onTop(blurCanvas(src, Math.max(2, d * 0.3)));
+  const c = cloneCanvas(src), x = c.getContext('2d'), id = x.getImageData(0, 0, w, hh), px = id.data;
+  if (RT.fx === 'sharpen') {
+    const bd = blurCanvas(src, Math.max(0.8, Math.max(w, hh) / 1200)).getContext('2d').getImageData(0, 0, w, hh).data, k = 0.6 + s * 2.4;
+    for (let i = 0; i < px.length; i += 4) {
+      px[i] += (px[i] - bd[i]) * k; px[i + 1] += (px[i + 1] - bd[i + 1]) * k; px[i + 2] += (px[i + 2] - bd[i + 2]) * k;
+    }
+  } else {
+    const def = RETOUCH_FX.find(f => f[0] === RT.fx)[2], a = {};
+    for (const key in def) a[key] = def[key] * (0.25 + s * 0.75);
+    applyStage(px, buildStage(a));
+  }
+  x.putImageData(id, 0, 0);
+  return c;
+}
+function retouchStart(p) {
+  RT.orig = P.base;
+  pushHistory();
+  P.base = cloneCanvas(RT.orig);
+  RT.mask = mk(RT.orig.width, RT.orig.height);
+  RT.tmp = mk(RT.orig.width, RT.orig.height);
+  RT.fxCv = makeRetouchFx(RT.orig, p);
+  RT.box = null;
+  retouchDab(p, p);
+}
+function retouchDab(a, b) {
+  if (!RT.mask) return;
+  const r = brushPx('retouch') / 2, m = RT.mask.getContext('2d');
+  const solid = RT.fx === 'clone' || RT.fx === 'heal', flow = solid ? 0.9 : 0.45;
+  const dist = Math.hypot(b.x - a.x, b.y - a.y), steps = Math.max(1, Math.ceil(dist / (r * 0.3)));
+  for (let i = 0; i <= steps; i++) {
+    const x = a.x + (b.x - a.x) * i / steps, y = a.y + (b.y - a.y) * i / steps;
+    const g = m.createRadialGradient(x, y, 0, x, y, r);
+    g.addColorStop(0, 'rgba(255,255,255,' + flow + ')');
+    g.addColorStop(solid ? 0.6 : 0.3, 'rgba(255,255,255,' + flow + ')');
+    g.addColorStop(1, 'rgba(255,255,255,0)');
+    m.fillStyle = g;
+    m.fillRect(x - r, y - r, r * 2, r * 2);
+  }
+  // 只重畫塗過的範圍，大圖才不會卡
+  const W = RT.mask.width, H = RT.mask.height, bx = RT.box || { x0: W, y0: H, x1: 0, y1: 0 };
+  bx.x0 = Math.max(0, Math.floor(Math.min(bx.x0, a.x - r, b.x - r))); bx.y0 = Math.max(0, Math.floor(Math.min(bx.y0, a.y - r, b.y - r)));
+  bx.x1 = Math.min(W, Math.ceil(Math.max(bx.x1, a.x + r, b.x + r))); bx.y1 = Math.min(H, Math.ceil(Math.max(bx.y1, a.y + r, b.y + r)));
+  RT.box = bx;
+  const bw = bx.x1 - bx.x0, bh = bx.y1 - bx.y0;
+  if (bw <= 0 || bh <= 0) return;
+  const t = RT.tmp.getContext('2d');
+  t.globalCompositeOperation = 'source-over';
+  t.clearRect(bx.x0, bx.y0, bw, bh);
+  t.drawImage(RT.fxCv, bx.x0, bx.y0, bw, bh, bx.x0, bx.y0, bw, bh);
+  t.globalCompositeOperation = 'destination-in';
+  t.drawImage(RT.mask, bx.x0, bx.y0, bw, bh, bx.x0, bx.y0, bw, bh);
+  t.globalCompositeOperation = 'source-over';
+  const o = P.base.getContext('2d');
+  o.drawImage(RT.orig, bx.x0, bx.y0, bw, bh, bx.x0, bx.y0, bw, bh);
+  o.drawImage(RT.tmp, bx.x0, bx.y0, bw, bh, bx.x0, bx.y0, bw, bh);
+}
+function retouchEnd() {
+  RT.orig = RT.fxCv = RT.mask = RT.tmp = RT.box = null;
+}
+
 // ── 畫布上的指標操作 ──
 function toBase(e) {
   const r = PV.getBoundingClientRect(), ins = frameInsets();
@@ -590,6 +729,13 @@ PV.addEventListener('pointerdown', e => {
   if (!P.base || P.tool === 'crop') return;
   const p = toBase(e), br = activeBrush();
   PV.setPointerCapture(e.pointerId);
+  if (br === 'retouch' && RT.fx === 'clone' && (RT.picking || !RT.src)) {
+    // 仿製筆：這一下是在指定「從哪裡複製」
+    RT.src = { x: p.x, y: p.y }; RT.picking = false;
+    showTool('retouch');
+    toast('取樣點設好了，現在到要蓋掉的地方塗抹');
+    return;
+  }
   if (br) { startStroke(br, p); drag = { type: 'brush', br, last: p }; requestRender(); return; }
   const o = hitObject(p);
   if (o) {
@@ -618,7 +764,7 @@ PV.addEventListener('pointermove', e => {
   }
   requestRender();
 });
-const endDrag = () => { drag = null; };
+const endDrag = () => { drag = null; retouchEnd(); };
 PV.addEventListener('pointerup', endDrag);
 PV.addEventListener('pointercancel', endDrag);
 PV.addEventListener('pointerleave', () => { $('#brushRing').hidden = true; });
@@ -754,6 +900,20 @@ const PANELS = {
       slider(el, { label: '力道', min: 5, max: 100, value: P.liqStrength, onInput: v => { P.liqStrength = v; } });
     }
   },
+  retouch(el) {
+    el.append(h('h2', { text: '細修' }), h('p', { text: '選一種效果，在照片上塗抹：人物、物品、天空、背景，塗到哪裡就只改哪裡。' }));
+    chips(el, RETOUCH_FX.map(f => [f[0], f[1]]), RT.fx, v => { RT.fx = v; RT.picking = false; showTool('retouch'); });
+    slider(el, { label: '筆刷大小', min: 1, max: 100, value: P.brushSize.retouch, onInput: v => { P.brushSize.retouch = v; } });
+    if (RT.fx === 'clone') {
+      el.append(h('p', { text: RT.src && !RT.picking ? '取樣點已設定。在要蓋掉的地方塗抹，會把取樣點附近的畫面複製過去。' : '先在照片上點一下「要複製的乾淨區域」（例如雜物旁邊的牆面或草地）。' }));
+      if (RT.src) el.append(h('button', { class: 'btn wide', 'aria-pressed': String(RT.picking), text: RT.picking ? '請在照片上點新的取樣點' : '重新選取樣點', onclick: () => { RT.picking = !RT.picking; showTool('retouch'); } }));
+    } else if (RT.fx === 'heal') {
+      el.append(h('p', { text: '在痘痘、斑點、細紋上輕點或塗抹。筆刷調到比斑點大一點效果最好。' }));
+    } else {
+      slider(el, { label: '強度', min: 5, max: 100, value: RT.strength, onInput: v => { RT.strength = v; } });
+      el.append(h('p', { text: '同一個地方多塗幾次效果會加重。塗過頭可以按「復原」。' }));
+    }
+  },
   crop(el) {
     el.append(h('h2', { text: '裁切與旋轉' }), h('h3', { text: '比例' }));
     chips(el, [[0, '自由'], [1, '1:1'], [4 / 3, '4:3'], [3 / 4, '3:4'], [16 / 9, '16:9'], [9 / 16, '9:16']], P.cropRatio, setCropRatio);
@@ -844,10 +1004,19 @@ const PANELS = {
   },
   frame(el) {
     el.append(h('h2', { text: '邊框' }));
-    chips(el, [['none', '無'], ['solid', '純色邊'], ['polaroid', '拍立得'], ['round', '圓角']], P.frame.type, v => { pushHistory(); P.frame.type = v; showTool('frame'); requestRender(); });
+    chips(el, [['none', '無'], ['solid', '純色邊'], ['line', '細線'], ['double', '雙線'], ['corner', '相角'], ['shadow', '立體陰影'], ['polaroid', '拍立得'], ['film', '底片'], ['round', '圓角'], ['circle', '圓形'], ['gradient', '漸層']], P.frame.type, v => {
+      pushHistory();
+      P.frame.type = v;
+      if (v === 'film' && P.frame.color === '#ffffff') P.frame.color = '#1a1a1a';
+      showTool('frame'); requestRender();
+    });
     if (P.frame.type === 'none') return;
-    el.append(h('h3', { text: '邊框顏色' }));
+    el.append(h('h3', { text: P.frame.type === 'gradient' ? '漸層起點顏色' : '邊框顏色' }));
     swatches(el, ['#ffffff', '#1a1a1a', '#f3e9dc', '#ffd9e4', '#d9f2ee'], P.frame.color, c => { P.frame.color = c; requestRender(); });
+    if (P.frame.type === 'gradient') {
+      el.append(h('h3', { text: '漸層終點顏色' }));
+      swatches(el, ['#ff5d8f', '#62d2c6', '#ffd24a', '#6b8cff', '#1a1a1a'], P.frame.color2 || '#ff5d8f', c => { P.frame.color2 = c; requestRender(); });
+    }
     slider(el, { label: '邊框寬度', min: 1, max: 20, value: P.frame.size, def: 5, onStart: pushHistory, onInput: v => { P.frame.size = v; requestRender(); } });
   }
 };
