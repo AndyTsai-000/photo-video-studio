@@ -4,7 +4,76 @@
 // 嘴型只會跟著音量開合，不會對出每個字的口型。
 const AVC = $('#avc');
 const avx = AVC.getContext('2d');
-const AV_VOICES = [['zh_CN-huayan-medium', '中文女聲'], ['en_US-hfc_female-medium', '英文女聲'], ['en_US-hfc_male-medium', '英文男聲']];
+// 各語言可用的語音模型（f 女聲、m 男聲）。只有一種性別的語言，另一種用調整音高的方式模擬。
+// 台語、客語沒有能直接唸漢字的模型，改用麥克風錄音。
+const AV_LANGS = [
+  ['zh', '中文', { f: 'zh_CN-huayan-medium' }],
+  ['en', '英文', { f: 'en_US-hfc_female-medium', m: 'en_US-hfc_male-medium' }],
+  ['nan', '台語', null],
+  ['hak', '客語', null],
+  ['es', '西班牙文', { f: 'es_MX-claude-high', m: 'es_ES-davefx-medium' }],
+  ['fr', '法文', { f: 'fr_FR-siwis-medium', m: 'fr_FR-tom-medium' }],
+  ['de', '德文', { f: 'de_DE-kerstin-low', m: 'de_DE-thorsten-medium' }],
+  ['it', '義大利文', { f: 'it_IT-paola-medium', m: 'it_IT-riccardo-x_low' }],
+  ['pt', '葡萄牙文', { m: 'pt_BR-faber-medium' }],
+  ['ru', '俄文', { f: 'ru_RU-irina-medium', m: 'ru_RU-denis-medium' }],
+  ['vi', '越南文', { f: 'vi_VN-vais1000-medium' }],   // 另一個男聲模型實測會執行失敗，男聲用模擬的
+  ['nl', '荷蘭文', { f: 'nl_BE-nathalie-medium', m: 'nl_BE-rdh-medium' }],
+  ['pl', '波蘭文', { f: 'pl_PL-gosia-medium', m: 'pl_PL-darkman-medium' }],
+  ['tr', '土耳其文', { m: 'tr_TR-dfki-medium' }],
+  ['ar', '阿拉伯文', { m: 'ar_JO-kareem-medium' }]
+];
+// 回傳要用的模型和音高倍率（1 表示不用調）；這個語言沒有模型時回傳 null
+function voiceFor(lang, gender) {
+  const t = (AV_LANGS.find(l => l[0] === lang) || [])[2];
+  if (!t) return null;
+  if (t[gender]) return { id: t[gender], shift: 1 };
+  return gender === 'm' ? { id: t.f, shift: 0.74 } : { id: t.m, shift: 1.4 };
+}
+// 改變音高但不改變說話速度：先重新取樣（音高和長度一起變），再把長度拉回來
+function pitchShift(x, factor) {
+  const n1 = Math.floor(x.length / factor), y = new Float32Array(n1);
+  for (let i = 0; i < n1; i++) { const p = i * factor, k = Math.floor(p), f = p - k; y[i] = x[k] * (1 - f) + (x[k + 1] || 0) * f; }
+  // 把 y 的長度縮放回原本的長度：一小段一小段接起來，每段都挑波形最接得上的位置（WSOLA）
+  const win = 1440, hs = win / 2, ha = hs * n1 / x.length, tol = 480, out = new Float32Array(x.length + win), wsum = new Float32Array(x.length + win), hann = new Float32Array(win);
+  for (let i = 0; i < win; i++) hann[i] = 0.5 - 0.5 * Math.cos(2 * Math.PI * i / win);
+  let prev = 0;
+  for (let k = 0; k * hs < x.length; k++) {
+    const ideal = Math.round(k * ha);
+    let best = clamp(ideal, 0, Math.max(0, n1 - win));
+    if (k > 0) {
+      const want = prev + hs;   // 上一段自然接下去的位置
+      let bs = -Infinity;
+      for (let d = -tol; d <= tol; d += 4) {
+        const c = ideal + d;
+        if (c < 0 || c + win >= n1 || want + win >= n1) continue;
+        let sc = 0;
+        for (let i = 0; i < hs; i += 6) sc += y[c + i] * y[want + i];
+        if (sc > bs) { bs = sc; best = c; }
+      }
+    }
+    prev = best;
+    const o = k * hs;
+    for (let i = 0; i < win && best + i < n1; i++) { out[o + i] += y[best + i] * hann[i]; wsum[o + i] += hann[i]; }
+  }
+  const res = new Float32Array(x.length);
+  for (let i = 0; i < res.length; i++) res[i] = wsum[i] > 1e-3 ? out[i] / wsum[i] : 0;
+  return res;
+}
+function pcmToWav(pcm, sr) {
+  const buf = new ArrayBuffer(44 + pcm.length * 2), v = new DataView(buf), str = (o, t) => { for (let i = 0; i < t.length; i++) v.setUint8(o + i, t.charCodeAt(i)); };
+  str(0, 'RIFF'); v.setUint32(4, 36 + pcm.length * 2, true); str(8, 'WAVEfmt '); v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true);
+  v.setUint32(24, sr, true); v.setUint32(28, sr * 2, true); v.setUint16(32, 2, true); v.setUint16(34, 16, true); str(36, 'data'); v.setUint32(40, pcm.length * 2, true);
+  for (let i = 0; i < pcm.length; i++) v.setInt16(44 + i * 2, clamp(pcm[i], -1, 1) * 32767, true);
+  return new Blob([buf], { type: 'audio/wav' });
+}
+async function decodeMono48k(blob) {
+  const OAC = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+  const ab = await new OAC(1, 1, 48000).decodeAudioData(await blob.arrayBuffer());
+  const pcm = new Float32Array(ab.length);
+  for (let ch = 0; ch < ab.numberOfChannels; ch++) { const d = ab.getChannelData(ch); for (let i = 0; i < d.length; i++) pcm[i] += d[i] / ab.numberOfChannels; }
+  return pcm;
+}
 const AV_ASPECTS = [['orig', '照片原比例'], ['9:16', '直式 9:16'], ['1:1', '方形 1:1'], ['16:9', '橫式 16:9']];
 const PIPER_URL = 'https://cdn.jsdelivr.net/npm/@mintplex-labs/piper-tts-web@1.0.5/+esm';
 const PIPER_PATHS = {
@@ -16,7 +85,7 @@ const VISION_URL = 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14
 const FACE_MODEL = 'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task';
 const AV = {
   img: null, pix: null, face: null, frame: null,
-  text: '', voice: 'zh_CN-huayan-medium', audio: null, lines: [],
+  text: '', gender: 'f', lang: 'zh', audio: null, lines: [], rec: null,
   el: null, playing: false, t: 0, amt: 70, blink: true, sway: true, caps: true, aspect: 'orig',
   busy: false, cancel: false, tts: null, detector: null
 };
@@ -203,10 +272,7 @@ async function setAvatarPhoto(file) {
 }
 // 把一段聲音設成虛擬人要說的話：算出每 1/60 秒的嘴巴開合程度
 async function setAvatarAudio(blob, text) {
-  const OAC = window.OfflineAudioContext || window.webkitOfflineAudioContext;
-  const ab = await new OAC(1, 1, 48000).decodeAudioData(await blob.arrayBuffer());
-  const pcm = new Float32Array(ab.length);
-  for (let ch = 0; ch < ab.numberOfChannels; ch++) { const d = ab.getChannelData(ch); for (let i = 0; i < d.length; i++) pcm[i] += d[i] / ab.numberOfChannels; }
+  const pcm = await decodeMono48k(blob);
   const hop = 800, n = Math.floor(pcm.length / hop), raw = new Float32Array(n), env = new Float32Array(n + 2);
   for (let i = 0; i < n; i++) { let s = 0; for (let j = i * hop, e = j + hop; j < e; j += 2) s += pcm[j] * pcm[j]; raw[i] = Math.sqrt(s / (hop / 2)); }
   const sorted = Float32Array.from(raw).sort(), ref = Math.max(1e-4, sorted[Math.floor(n * 0.9)] || 0);
@@ -236,23 +302,28 @@ async function toSimp(text) {
   return toSimpFn(text);
 }
 async function avatarSpeak() {
-  const text = AV.text.trim();
+  const text = AV.text.trim(), voice = voiceFor(AV.lang, AV.gender);
   if (AV.busy) return;
+  if (!voice) { toast('這個語言沒有語音模型，請改用麥克風錄音'); return; }
   if (!text) { toast('先輸入要讓人像說的話'); return; }
   AV.busy = true; avatarPanel();
   aiStatus('正在準備語音…', 1);
   try {
     if (!AV.tts) AV.tts = await import(PIPER_URL);
-    const lib = AV.tts, zh = AV.voice.startsWith('zh');
+    const lib = AV.tts;
     // 中文語音模型認簡體字，先轉換；顯示的字幕仍用原本輸入的文字
-    const say = zh ? await toSimp(text) : text;
+    const say = AV.lang === 'zh' ? await toSimp(text) : text;
     lib.TtsSession._instance = null;   // 換聲音時要重新載入模型
     const session = await lib.TtsSession.create({
-      voiceId: AV.voice, wasmPaths: PIPER_PATHS,
+      voiceId: voice.id, wasmPaths: PIPER_PATHS,
       progress: p => { if (p && p.total) aiStatus('第一次使用這個聲音，正在下載語音模型…（之後不用再下載）', p.loaded / p.total); }
     });
     aiStatus('正在把文字變成語音…', 1);
-    const wav = await session.predict(say);
+    let wav = await session.predict(say);
+    if (voice.shift !== 1) {
+      aiStatus('正在調整成' + (AV.gender === 'm' ? '男聲' : '女聲') + '…', 1);
+      wav = pcmToWav(pitchShift(await decodeMono48k(wav), voice.shift), 48000);
+    }
     await setAvatarAudio(wav, text);
     aiStatus(null);
     AV.busy = false;
@@ -260,10 +331,33 @@ async function avatarSpeak() {
     avatarPlay();
   } catch (e) {
     aiStatus(null);
-    toast('語音無法產生：下載不到語音模型。請確認網路；在 Claude 頁面裡請改用獨立網址版本。也可以改用自己的錄音檔。', 7000);
+    toast('語音無法產生：下載不到語音模型。請確認網路；在 Claude 頁面裡請改用獨立網址版本。也可以改用麥克風錄音或自己的錄音檔。', 7000);
   }
   AV.busy = false;
   avatarPanel();
+}
+// 用麥克風錄一段話當作人像的聲音（台語、客語，或想用自己的聲音時）
+async function avatarRecord() {
+  if (AV.rec) { AV.rec.stop(); return; }
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia || !window.MediaRecorder) { toast('這個瀏覽器不能錄音，請改用「選錄音檔」'); return; }
+  let stream;
+  try { stream = await navigator.mediaDevices.getUserMedia({ audio: true }); }
+  catch (e) { toast('沒有取得麥克風的使用權限。請在瀏覽器網址列旁允許麥克風，或改用「選錄音檔」。在 Claude 頁面裡不能錄音。', 7000); return; }
+  avatarStop();
+  const chunks = [], rec = new MediaRecorder(stream);
+  rec.ondataavailable = e => { if (e.data.size) chunks.push(e.data); };
+  rec.onstop = async () => {
+    stream.getTracks().forEach(t => t.stop());
+    AV.rec = null;
+    try {
+      await setAvatarAudio(new Blob(chunks, { type: rec.mimeType || 'audio/webm' }), AV.text.trim());
+      avatarPanel(); avatarRefresh(); avatarPlay();
+    } catch (e) { toast('錄音沒有成功，請再試一次'); avatarPanel(); }
+  };
+  AV.rec = rec;
+  rec.start();
+  avatarPanel();
+  toast('錄音中…說完再按一次按鈕停止', 4000);
 }
 
 // ── 預覽播放 ──
@@ -383,16 +477,27 @@ function avatarPanel() {
   ta.addEventListener('input', () => { AV.text = ta.value; });
   el.append(h('label', { class: 'field', for: 'avText' }, '文字內容（最多 600 字）', ta));
   el.append(h('h3', { text: '聲音' }));
-  chips(el, AV_VOICES, AV.voice, v => { AV.voice = v; });
-  el.append(h('button', { class: 'btn primary wide', disabled: AV.busy, text: AV.audio ? '重新產生語音' : '產生語音並播放', onclick: avatarSpeak }));
+  chips(el, [['f', '女聲'], ['m', '男聲']], AV.gender, v => { AV.gender = v; avatarPanel(); });
+  el.append(h('h3', { text: '語言' }));
+  chips(el, AV_LANGS.map(l => [l[0], l[1]]), AV.lang, v => { AV.lang = v; avatarPanel(); });
+  const voice = voiceFor(AV.lang, AV.gender), langName = AV_LANGS.find(l => l[0] === AV.lang)[1];
+  if (voice) {
+    if (voice.shift !== 1) el.append(h('p', { text: langName + '只有' + (AV.gender === 'm' ? '女聲' : '男聲') + '的語音模型，' + (AV.gender === 'm' ? '男聲' : '女聲') + '是把音調' + (AV.gender === 'm' ? '調低' : '調高') + '模擬出來的，聽起來會比較不自然。' }));
+    if (AV.lang === 'zh') el.append(h('p', { text: '中文是標準國語口音。' }));
+    else if (AV.lang !== 'en') el.append(h('p', { text: '請直接輸入' + langName + '，程式不會幫你翻譯。' }));
+    el.append(h('button', { class: 'btn primary wide', disabled: AV.busy, text: AV.audio ? '重新產生語音' : '產生語音並播放', onclick: avatarSpeak }));
+  } else {
+    el.append(h('p', { text: langName + '目前沒有能把文字直接唸出來的語音模型。請按下面的按鈕，用麥克風自己唸一段' + langName + '，人像會跟著你的聲音開口。上面輸入的文字會當成字幕。' }));
+  }
+  el.append(h('button', { class: 'btn wide' + (voice ? '' : ' primary'), disabled: AV.busy, 'aria-pressed': String(!!AV.rec), text: AV.rec ? '錄音中…按這裡停止' : '用麥克風錄音', onclick: avatarRecord }));
   el.append(h('button', {
-    class: 'btn wide', disabled: AV.busy, text: '改用自己的錄音檔', onclick: async () => {
+    class: 'btn wide', disabled: AV.busy, text: '選錄音檔', onclick: async () => {
       const [f] = await pickFiles($('#fileAudio'));
       if (!f) return;
-      try { await setAvatarAudio(f, ''); avatarPanel(); avatarRefresh(); avatarPlay(); } catch (e) { toast('這個聲音檔讀不了，請換 mp3、m4a 或 wav'); }
+      try { await setAvatarAudio(f, AV.text.trim()); avatarPanel(); avatarRefresh(); avatarPlay(); } catch (e) { toast('這個聲音檔讀不了，請換 mp3、m4a 或 wav'); }
     }
   }));
-  el.append(h('p', { text: '中文聲音是標準國語口音。用自己的錄音檔時，人像會跟著你的聲音開口，但不會有字幕。' }));
+  el.append(h('p', { text: '用錄音時，人像會跟著你的聲音開口；上面有輸入文字的話會當成字幕。' }));
 
   el = group(root, 'av.motion', '2　動作', false);
   slider(el, { label: '嘴巴張開的幅度', min: 20, max: 130, value: AV.amt, def: 70, fmt: v => v + '%', onInput: v => { AV.amt = v; if (!AV.playing) { avatarDraw(AVC, AV.t); } } });

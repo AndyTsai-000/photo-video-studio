@@ -24,7 +24,7 @@ function saveExp() {
 
 function setMode(mode) {
   if (MODE === 'video' && mode !== 'video') pause();
-  if (MODE === 'avatar' && mode !== 'avatar') avatarStop();
+  if (MODE === 'avatar' && mode !== 'avatar') { avatarStop(); if (AV.rec) AV.rec.stop(); }
   MODE = mode;
   $('#app').dataset.mode = mode;
   for (const id of MODES) $('#' + id).hidden = id !== mode;
