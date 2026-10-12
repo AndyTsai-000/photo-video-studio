@@ -241,8 +241,47 @@ async function aiMatte(src, model, opts) {
   return full;
 }
 
-// 把 mark 畫布上塗過的地方從 base 清掉並補上背景，回傳新的畫布；沒有塗抹時回傳 null
+// 把 mark 畫布上塗過的地方從 base 清掉並補上背景，回傳新的畫布；沒有塗抹時回傳 null。
+// 標記分成好幾塊、彼此離得遠時（例如左上和右下各一個浮水印）一塊一塊處理：
+// 模型每次只處理 512×512，範圍越小補出來越清楚
 async function aiInpaint(base, mark) {
+  const W = base.width, H = base.height, S = 128, probe = mk(S, S), px = probe.getContext('2d');
+  px.drawImage(mark, 0, 0, S, S);
+  const pd = px.getImageData(0, 0, S, S).data, on = new Uint8Array(S * S), label = new Int32Array(S * S);
+  // 先把標記往外擴兩格，靠得很近的幾塊就會連成一塊
+  for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) {
+    if (pd[(y * S + x) * 4 + 3] <= 10) continue;
+    for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) { const xx = x + dx, yy = y + dy; if (xx >= 0 && yy >= 0 && xx < S && yy < S) on[yy * S + xx] = 1; }
+  }
+  const boxes = [];
+  for (let i = 0; i < S * S; i++) {
+    if (!on[i] || label[i]) continue;
+    const id = boxes.length + 1, b = { x0: S, y0: S, x1: 0, y1: 0 }, stack = [i];
+    label[i] = id;
+    while (stack.length) {
+      const c = stack.pop(), cx = c % S, cy = (c - cx) / S;
+      b.x0 = Math.min(b.x0, cx); b.x1 = Math.max(b.x1, cx); b.y0 = Math.min(b.y0, cy); b.y1 = Math.max(b.y1, cy);
+      for (const n of [c - 1, c + 1, c - S, c + S]) {
+        if (n < 0 || n >= S * S || label[n] || !on[n]) continue;
+        if ((n === c - 1 && cx === 0) || (n === c + 1 && cx === S - 1)) continue;
+        label[n] = id; stack.push(n);
+      }
+    }
+    boxes.push(b);
+  }
+  if (!boxes.length) return null;
+  if (boxes.length === 1 || boxes.length > 4) return inpaintOne(base, mark, '');
+  let cur = base;
+  for (let k = 0; k < boxes.length; k++) {
+    const b = boxes[k], x = Math.floor(b.x0 / S * W), y = Math.floor(b.y0 / S * H), w = Math.ceil((b.x1 + 1) / S * W) - x, hh = Math.ceil((b.y1 + 1) / S * H) - y;
+    const part = mk(W, H);
+    part.getContext('2d').drawImage(mark, x, y, w, hh, x, y, w, hh);
+    const out = await inpaintOne(cur, part, '（第 ' + (k + 1) + ' / ' + boxes.length + ' 處）');
+    if (out) cur = out;
+  }
+  return cur === base ? null : cur;
+}
+async function inpaintOne(base, mark, note) {
   const W = base.width, H = base.height, S = 256, N = 512;
   const probe = mk(S, S), px = probe.getContext('2d');
   px.drawImage(mark, 0, 0, S, S);
@@ -255,13 +294,25 @@ async function aiInpaint(base, mark) {
   // 取塗抹範圍周圍一塊（留足夠的背景讓模型參考），縮到模型要的 512×512
   const bx0 = x0 / S * W, by0 = y0 / S * H, bx1 = (x1 + 1) / S * W, by1 = (y1 + 1) / S * H;
   const side = Math.max(bx1 - bx0, by1 - by0) * 2.4 + 80;
-  const cw = Math.round(Math.min(W, side)), ch = Math.round(Math.min(H, side));
-  const cx = Math.round(clamp((bx0 + bx1) / 2 - cw / 2, 0, W - cw)), cy = Math.round(clamp((by0 + by1) / 2 - ch / 2, 0, H - ch));
+  // 標記貼著照片邊緣時，取樣範圍往照片外面多伸一些（最多伸出自己大小的 35%），
+  // 伸出去的部分用邊緣那一排像素延伸填滿。這樣模型在標記的每一邊都有背景可以參考，
+  // 否則貼邊的地方會補出一塊暗影
+  const cw = Math.round(Math.min(W * 1.5, side)), ch = Math.round(Math.min(H * 1.5, side));
+  const cx = Math.round(clamp((bx0 + bx1) / 2 - cw / 2, -cw * 0.35, W - cw * 0.65)), cy = Math.round(clamp((by0 + by1) / 2 - ch / 2, -ch * 0.35, H - ch * 0.65));
+  const pad = mk(cw, ch), pdx = pad.getContext('2d');
+  pdx.drawImage(base, -cx, -cy);
+  const lx = Math.max(0, -cx), rx = Math.min(cw, W - cx), ty = Math.max(0, -cy), by = Math.min(ch, H - cy);
+  if (lx > 0) pdx.drawImage(pad, lx, ty, 1, by - ty, 0, ty, lx, by - ty);
+  if (rx < cw) pdx.drawImage(pad, rx - 1, ty, 1, by - ty, rx, ty, cw - rx, by - ty);
+  if (ty > 0) pdx.drawImage(pad, 0, ty, cw, 1, 0, 0, cw, ty);
+  if (by < ch) pdx.drawImage(pad, 0, by - 1, cw, 1, 0, by, cw, ch - by);
   const img = mk(N, N), ix = img.getContext('2d');
   ix.imageSmoothingQuality = 'high';
-  ix.drawImage(base, cx, cy, cw, ch, 0, 0, N, N);
+  ix.drawImage(pad, 0, 0, cw, ch, 0, 0, N, N);
+  const markPad = mk(cw, ch);
+  markPad.getContext('2d').drawImage(mark, -cx, -cy);
   const mc = mk(N, N), mx = mc.getContext('2d');
-  mx.drawImage(mark, cx, cy, cw, ch, 0, 0, N, N);
+  mx.drawImage(markPad, 0, 0, cw, ch, 0, 0, N, N);
   const mdata = mx.getImageData(0, 0, N, N).data, raw = new Uint8Array(N * N), tmp = new Uint8Array(N * N), hole = new Uint8Array(N * N);
   for (let i = 0; i < N * N; i++) raw[i] = mdata[i * 4 + 3] > 25 ? 1 : 0;
   // 把遮罩往外擴一圈，邊緣殘影才清得乾淨
@@ -277,7 +328,7 @@ async function aiInpaint(base, mark) {
     hole[y * N + x] = v;
   }
   const id = ix.getImageData(0, 0, N, N);
-  const res = await aiCall({ type: 'inpaint', data: id.data.buffer, mask: hole.buffer.slice(0) }, [id.data.buffer], '正在準備清除…');
+  const res = await aiCall({ type: 'inpaint', data: id.data.buffer, mask: hole.buffer.slice(0) }, [id.data.buffer], '正在準備清除…' + note);
   const filled = mk(N, N);
   filled.getContext('2d').putImageData(new ImageData(new Uint8ClampedArray(res.data), N, N), 0, 0);
   // 只把補好的部分（遮罩範圍，邊緣柔化）貼回原圖

@@ -46,7 +46,7 @@ const FONTS = {
 };
 const STICKERS = ['❤️', '⭐', '✨', '🔥', '🌸', '🎀', '👑', '😎', '😍', '🥰', '😂', '🤩', '🎉', '🎈', '🌈', '☀️', '🌙', '☁️', '🍀', '🐱', '🐶', '🦋', '💬', '💯', '👍', '✌️', '🎂', '☕', '🍓', '📍', '🎵', '💡'];
 const EMOJI_FONT = '"Segoe UI Emoji","Apple Color Emoji","Noto Color Emoji",sans-serif';
-const PHOTO_TOOLS = [['adjust', '調整'], ['filter', '濾鏡'], ['beauty', '美顏'], ['retouch', '細修'], ['cutout', '去背'], ['remove', '清除'], ['crop', '裁切'], ['text', '文字'], ['sticker', '貼圖'], ['brush', '畫筆'], ['frame', '邊框']];
+const PHOTO_TOOLS = [['adjust', '調整'], ['filter', '濾鏡'], ['beauty', '美顏'], ['retouch', '細修'], ['cutout', '去背'], ['remove', '清除'], ['wm', '去除浮水印'], ['crop', '裁切'], ['text', '文字'], ['sticker', '貼圖'], ['brush', '畫筆'], ['frame', '邊框']];
 
 const P = {
   base: null, paint: null, objects: [], sel: null,
@@ -56,7 +56,7 @@ const P = {
   tool: 'adjust', hist: [], redo: [], open: { light: false, color: false, quality: false, fx: false, hsl: false },
   crop: { x: 0, y: 0, w: 1, h: 1 }, cropRatio: 0,
   brushMode: 'doodle', brushColor: '#ff5d8f', brushSize: { doodle: 30, mosaic: 40, erase: 40, liquify: 45, retouch: 35, mask: 30, mark: 35 },
-  cut: null, cutModel: 'Xenova/modnet', maskBrush: '', mark: null,
+  cut: null, cutModel: 'Xenova/modnet', maskBrush: '', mark: null, wmMode: 'rect',
   hsl: {}, hslBand: 'red', fx: { type: 'none', amt: 60 }, zoom: 1,
   liqOn: false, liqStrength: 50, compare: false
 };
@@ -450,12 +450,21 @@ async function runCutout() {
     toast('去背完成，可以在右邊換背景');
   } catch (e) { aiErrorToast(e); }
 }
+// 在指定的角落標出一塊常見的浮水印位置（寬 30%、高 12%）
+function markCorner(pos) {
+  const W = P.base.width, H = P.base.height, w = Math.round(W * 0.3), hh = Math.round(H * 0.12);
+  if (!P.mark || P.mark.width !== W || P.mark.height !== H) P.mark = mk(W, H);
+  const x = P.mark.getContext('2d');
+  x.fillStyle = '#ff3c5a';
+  x.fillRect(pos[1] === 'r' ? W - w : 0, pos[0] === 'b' ? H - hh : 0, w, hh);
+  requestRender();
+}
 async function runRemove() {
-  const base = P.base;
-  if (!P.mark) { toast('先在照片上塗抹要清除的人或物品'); return; }
+  const base = P.base, hint = P.tool === 'wm' ? '先把浮水印框起來或塗起來' : '先在照片上塗抹要清除的人或物品';
+  if (!P.mark) { toast(hint); return; }
   try {
     const out = await aiInpaint(base, P.mark);
-    if (!out) { toast('先在照片上塗抹要清除的人或物品'); return; }
+    if (!out) { toast(hint); return; }
     if (P.base !== base) return;
     pushHistory();
     P.base = out; P.mark = null;
@@ -663,7 +672,7 @@ function renderPhoto(target, maxSide, opts) {
   if (ins.l > 0) drawFramed(ctx, wc, W, H, ix, iy, iw, ih, Math.round(ins.l * s), Math.round(ins.t * s));
   else ctx.drawImage(wc, ix, iy);
   if (opts.raw) return;
-  if (!opts.final && P.mark && P.tool === 'remove') {
+  if (!opts.final && P.mark && (P.tool === 'remove' || P.tool === 'wm')) {
     ctx.save(); ctx.globalAlpha = 0.55; ctx.drawImage(P.mark, ix, iy, iw, ih); ctx.restore();
   }
 
@@ -800,7 +809,7 @@ $('#cropBox').addEventListener('pointerdown', e0 => {
 function activeBrush() {
   if (P.tool === 'brush') return P.brushMode;
   if (P.tool === 'retouch') return 'retouch';
-  if (P.tool === 'remove') return 'mark';
+  if (P.tool === 'remove' || (P.tool === 'wm' && P.wmMode === 'brush')) return 'mark';
   if (P.tool === 'cutout' && P.cut && P.maskBrush) return P.maskBrush;
   if (P.tool === 'beauty' && P.liqOn) return 'liquify';
   return null;
@@ -1007,6 +1016,12 @@ PV.addEventListener('pointerdown', e => {
     return;
   }
   if (br) { startStroke(br, p); drag = { type: 'brush', br, last: p }; requestRender(); return; }
+  if (P.tool === 'wm') {
+    // 去除浮水印的框選：拖出一個方框，把浮水印框起來
+    if (!P.mark || P.mark.width !== P.base.width || P.mark.height !== P.base.height) P.mark = mk(P.base.width, P.base.height);
+    drag = { type: 'rect', x: p.x, y: p.y, base: cloneCanvas(P.mark) };
+    return;
+  }
   if (P.tool === 'cutout' && cutMovable()) {
     // 去背工具裡直接拖曳：移動主體
     drag = { type: 'cut', x: p.x, y: p.y, dx: P.cut.dx || 0, dy: P.cut.dy || 0, moved: false };
@@ -1033,7 +1048,13 @@ PV.addEventListener('pointermove', e => {
   } else ring.hidden = true;
   if (!drag) return;
   if (drag.type === 'brush') { stroke(drag.br, drag.last, p); drag.last = p; }
-  else if (drag.type === 'cut') {
+  else if (drag.type === 'rect') {
+    const x = P.mark.getContext('2d');
+    x.clearRect(0, 0, P.mark.width, P.mark.height);
+    x.drawImage(drag.base, 0, 0);
+    x.fillStyle = '#ff3c5a';
+    x.fillRect(Math.min(drag.x, p.x), Math.min(drag.y, p.y), Math.abs(p.x - drag.x), Math.abs(p.y - drag.y));
+  } else if (drag.type === 'cut') {
     if (!drag.moved) { pushHistory(); drag.moved = true; }
     P.cut.dx = drag.dx + p.x - drag.x; P.cut.dy = drag.dy + p.y - drag.y;
   } else {
@@ -1280,6 +1301,19 @@ const PANELS = {
       h('button', { class: 'btn', text: '重新去背', onclick: runCutout }),
       h('button', { class: 'btn danger', text: '取消去背', onclick: () => { pushHistory(); P.cut = null; P.maskBrush = ''; showTool('cutout'); redraw(); } })));
     chips(el, AI_MATTE_MODELS, P.cutModel, v => { P.cutModel = v; });
+  },
+  wm(el) {
+    el.append(h('h2', { text: '去除浮水印' }));
+    el.append(h('p', { text: '把浮水印、日期、Logo 框起來，按下面的按鈕就會把它清掉並補上背景。可以一次框好幾個地方。' }));
+    el.append(h('h3', { text: '標記方式' }));
+    chips(el, [['rect', '拖曳框選'], ['brush', '用筆刷塗']], P.wmMode, v => { P.wmMode = v; showTool('wm'); });
+    if (P.wmMode === 'brush') slider(el, { label: '筆刷大小', min: 1, max: 100, value: P.brushSize.mark, onInput: v => { P.brushSize.mark = v; } });
+    el.append(h('h3', { text: '浮水印在角落的話，可以直接點' }));
+    chips(el, [['tl', '左上角'], ['tr', '右上角'], ['bl', '左下角'], ['br', '右下角']], '', markCorner);
+    el.append(h('button', { class: 'btn primary wide', text: '去除標記的地方', onclick: runRemove }));
+    el.append(h('button', { class: 'btn wide', text: '重新標記（清掉紅色）', onclick: () => { P.mark = null; requestRender(); } }));
+    el.append(h('p', { text: '標記要把整個浮水印蓋住、稍微大一點沒關係。第一次使用要下載約 208MB 的 AI 模型，每次處理大約半分鐘。蓋滿整張圖的重複浮水印效果不好。' }));
+    el.append(h('p', { text: '請只用在你自己的照片，或你有權使用的圖片上。' }));
   },
   remove(el) {
     el.append(h('h2', { text: '清除物件' }));

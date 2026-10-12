@@ -111,7 +111,7 @@ select {
 
 /* ── 三個模式共用的版面 ── */
 .mode { flex: 1; min-height: 0; display: grid; }
-#photo { grid-template-columns: 76px minmax(0, 1fr) 300px; }
+#photo { grid-template-columns: 92px minmax(0, 1fr) 300px; }
 #photo.is-empty { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); }
 #collage, #avatar { grid-template-columns: minmax(0, 1fr) 300px; }
 #avatar.is-empty { grid-template-columns: minmax(0, 1fr); }
@@ -322,7 +322,7 @@ input[type="color"] { width: 34px; height: 28px; padding: 0; border: 1px solid v
 .panel-off .panel-toggle::before { transform: translateX(2px) rotate(135deg); }
 .panel-off .panel { display: none; }
 .is-empty .panel-toggle { display: none; }
-#photo.panel-off { grid-template-columns: 76px minmax(0, 1fr); }
+#photo.panel-off { grid-template-columns: 92px minmax(0, 1fr); }
 #collage.panel-off, #video.panel-off { grid-template-columns: minmax(0, 1fr); }
 @media (max-width: 760px) {
   /* 手機上工具列在下方，箭頭固定在右上角 */
