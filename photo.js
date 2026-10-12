@@ -9,8 +9,16 @@ const ADJ = [
   ['exposure', '曝光', -100, 100], ['temp', '色溫', -100, 100], ['tint', '色調', -100, 100],
   ['hue', '色相', -180, 180], ['highlights', '高光', -100, 100], ['shadows', '陰影', -100, 100],
   ['fade', '褪色', 0, 100], ['clarity', '清晰度', -100, 100], ['sharpen', '銳利', 0, 100], ['blur', '柔焦', 0, 100],
-  ['vignette', '暗角', 0, 100], ['grain', '顆粒', 0, 100]
+  ['vignette', '暗角', 0, 100], ['grain', '顆粒', 0, 100], ['denoise', '降噪', 0, 100]
 ];
+// 調整面板的分類，每一類都可以用箭頭收合
+const ADJ_GROUPS = [
+  ['light', '光線', ['brightness', 'contrast', 'exposure', 'highlights', 'shadows']],
+  ['color', '色彩', ['saturation', 'vibrance', 'temp', 'tint', 'hue']],
+  ['quality', '畫質', ['denoise', 'sharpen', 'clarity']],
+  ['fx', '效果', ['fade', 'blur', 'vignette', 'grain']]
+];
+const UPSCALE_MAX = 6000;   // 放大解析度後的長邊上限
 const PRESETS = [
   ['none', '原圖', {}],
   ['fresh', '清新', { brightness: .12, contrast: -.05, saturation: .15, temp: -.12, fade: .15 }],
@@ -45,7 +53,7 @@ const P = {
   adj: {}, preset: 'none', presetAmt: 100,
   beauty: { smooth: 0, whiten: 0, rosy: 0 },
   frame: { type: 'none', color: '#ffffff', size: 5 },
-  tool: 'adjust', hist: [], redo: [],
+  tool: 'adjust', hist: [], redo: [], open: { light: true, color: true, quality: true, fx: true },
   crop: { x: 0, y: 0, w: 1, h: 1 }, cropRatio: 0,
   brushMode: 'doodle', brushColor: '#ff5d8f', brushSize: { doodle: 30, mosaic: 40, erase: 40, liquify: 45 },
   liqOn: false, liqStrength: 50, compare: false
@@ -223,6 +231,19 @@ function beautyPass(cv) {
   ctx.putImageData(id, 0, 0);
 }
 
+// 降噪：平滑的區域往模糊版靠攏，邊緣和細節差異大的地方保留原樣
+function denoisePass(cv, amt) {
+  const w = cv.width, hh = cv.height, ctx = cv.getContext('2d');
+  const id = ctx.getImageData(0, 0, w, hh), d = id.data;
+  const bd = blurCanvas(cv, Math.max(1, Math.max(w, hh) / 1600 * (1 + amt * 2.5))).getContext('2d').getImageData(0, 0, w, hh).data;
+  const edge = 60 + amt * 140;
+  for (let i = 0; i < d.length; i += 4) {
+    const diff = Math.abs(d[i] - bd[i]) + Math.abs(d[i + 1] - bd[i + 1]) + Math.abs(d[i + 2] - bd[i + 2]);
+    const k = amt * Math.max(0, 1 - diff / edge);
+    d[i] += (bd[i] - d[i]) * k; d[i + 1] += (bd[i + 1] - d[i + 1]) * k; d[i + 2] += (bd[i + 2] - d[i + 2]) * k;
+  }
+  ctx.putImageData(id, 0, 0);
+}
 let noiseTile = null;
 function getNoise() {
   if (noiseTile) return noiseTile;
@@ -317,6 +338,7 @@ function renderPhoto(target, maxSide, opts) {
   wx.drawImage(P.base, 0, 0, iw, ih);
   if (!opts.raw) {
     beautyPass(wc);
+    if (P.adj.denoise) denoisePass(wc, P.adj.denoise / 100);
     const st1 = presetStage(P.preset, P.presetAmt / 100), st2 = userStage();
     const sharp = P.adj.sharpen / 100, clar = P.adj.clarity / 100, vib = P.adj.vibrance / 100;
     if (st1 || st2 || sharp || clar || vib) {
@@ -421,6 +443,15 @@ function rotatedFill(src, deg) {
   x.translate(w / 2, hh / 2); x.rotate(a); x.scale(z, z);
   x.drawImage(src, -w / 2, -hh / 2);
   return c;
+}
+// 把解析度放大（像素變多，方便之後放大輸出或裁切），文字、貼圖跟著等比例放大
+function upscalePhoto() {
+  const w = P.base.width, hh = P.base.height, k = Math.min(2, UPSCALE_MAX / Math.max(w, hh));
+  if (k < 1.05) { toast('已經是可處理的最大解析度了'); return; }
+  transformAll(Math.round(w * k), Math.round(hh * k), x => { x.imageSmoothingQuality = 'high'; x.scale(k, k); }, (px, py) => [px * k, py * k]);
+  for (const o of P.objects) o.size *= k;
+  showTool('adjust');
+  toast('解析度已放大到 ' + P.base.width + ' × ' + P.base.height + '，可以再加一點「銳利」');
 }
 function applyCrop() {
   const c = P.crop, w = P.base.width, hh = P.base.height;
@@ -673,8 +704,20 @@ const PANELS = {
     el.append(h('h2', { text: '調整' }));
     el.append(h('button', { class: 'btn primary wide', text: '自動調整', onclick: autoAdjust }));
     el.append(h('p', { text: '自動調整會依照片的明暗和色偏設定下面的滑桿，之後可以再微調。在滑桿上點兩下可以歸零。' }));
-    for (const [k, label, min, max] of ADJ) {
-      slider(el, { label, min, max, value: P.adj[k], def: 0, onStart: pushHistory, onInput: v => { P.adj[k] = v; requestRender(); } });
+    for (const [gid, title, keys] of ADJ_GROUPS) {
+      const body = h('div', { class: 'group-body' });
+      for (const k of keys) {
+        const [, label, min, max] = ADJ.find(a => a[0] === k);
+        slider(body, { label, min, max, value: P.adj[k], def: 0, onStart: pushHistory, onInput: v => { P.adj[k] = v; requestRender(); } });
+      }
+      if (gid === 'quality') {
+        slider(body, { label: '匯出畫質（JPG、WebP）', min: 50, max: 100, value: EXP.photo.q, def: 95, fmt: v => v + '%', onInput: v => { EXP.photo.q = v; }, onEnd: saveExp });
+        body.append(h('button', { class: 'btn wide', text: '解析度放大 2 倍', onclick: upscalePhoto }));
+        body.append(h('p', { text: '目前 ' + P.base.width + ' × ' + P.base.height + ' 像素。放大能讓輸出尺寸變大，但不會多出原圖沒有的細節。' }));
+      }
+      const box = h('details', { class: 'group', open: P.open[gid] }, h('summary', { text: title }), body);
+      box.addEventListener('toggle', () => { P.open[gid] = box.open; });
+      el.append(box);
     }
     el.append(h('button', { class: 'btn wide', text: '恢復預設', onclick: () => { pushHistory(); resetAdj(); showTool('adjust'); requestRender(); } }));
   },

@@ -123,6 +123,19 @@ select {
 .panel p { margin: 0; color: var(--muted); font-size: 13px; }
 .panel hr { border: 0; border-top: 1px solid var(--line); margin: 4px 0; width: 100%; }
 
+.group { border-top: 1px solid var(--line); }
+.group > summary {
+  cursor: pointer; list-style: none; display: flex; align-items: center; justify-content: space-between;
+  padding: 10px 0 8px; font-weight: 700; user-select: none;
+}
+.group > summary::-webkit-details-marker { display: none; }
+.group > summary::after {
+  content: ""; width: 8px; height: 8px; margin-right: 4px; border-right: 2px solid var(--muted); border-bottom: 2px solid var(--muted);
+  transform: rotate(-45deg); transition: transform .15s;
+}
+.group[open] > summary::after { transform: rotate(45deg); }
+.group-body { display: flex; flex-direction: column; gap: 12px; padding: 2px 0 12px; }
+@media (prefers-reduced-motion: reduce) { .group > summary::after { transition: none; } }
 .row { display: grid; grid-template-columns: 1fr auto; gap: 2px 8px; align-items: center; }
 .row label { font-size: 13px; }
 .row output { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
