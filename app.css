@@ -284,6 +284,7 @@ input[type="color"] { width: 34px; height: 28px; padding: 0; border: 1px solid v
 .music-meta strong, .music-meta span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .music-meta span { font-size: 12px; color: var(--muted); }
 .credit { user-select: all; background: var(--bg); border-radius: 8px; padding: 8px; font-size: 12px; overflow-wrap: anywhere; }
+.save-preview { width: 100%; max-height: 38vh; object-fit: contain; border-radius: 8px; background: var(--bg); }
 #dlgCard .actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 6px; }
 .export-card p { margin: 0; color: var(--muted); }
 .progress { height: 8px; background: var(--bg); border-radius: 999px; overflow: hidden; }
