@@ -99,7 +99,9 @@ function drawClip(ctx, c, local, W, H) {
     ctx.restore();
   };
   ctx.save();
-  if (c.fade) ctx.globalAlpha = clamp(Math.min(local, d - local) / Math.min(0.5, d / 2), 0, 1);
+  // 開頭淡入、結尾淡出分開設定（舊版的 fade 代表兩個都開）
+  const fadeLen = Math.min(0.5, d / 2), fin = c.fadeIn || c.fade, fout = c.fadeOut || c.fade;
+  if (fin || fout) ctx.globalAlpha = clamp(Math.min(fin ? local / fadeLen : 1, fout ? (d - local) / fadeLen : 1), 0, 1);
   // 模糊背景：先鋪一層放大、模糊的同一個畫面，再把完整畫面疊上去
   if (c.fit === 'blur') put(cover * 1.1, (f.css === 'none' ? '' : f.css + ' ') + 'blur(' + Math.round(H / 30) + 'px) brightness(.65)', null);
   put((c.fit === 'cover' ? cover : contain) * c.zoom * kb, f.css, f.overlay);
@@ -309,7 +311,7 @@ function thumbOf(src, sw, sh) {
   try { return c.toDataURL('image/jpeg', 0.6); } catch (e) { return ''; }
 }
 function newClip(kind, el, name, dur, thumb) {
-  return { id: ++vid, kind, el, name, srcDur: dur, in: 0, out: dur, speed: 1, vol: 1, filter: 'none', b: 0, c: 0, s: 0, fit: 'cover', rot: 0, flip: false, zoom: 1, fade: false, trans: 'none', kb: 'none', vig: 0, thumb, file: null, capOn: true, cap: { pos: 'bottom', size: 6, color: '#ffffff' } };
+  return { id: ++vid, kind, el, name, srcDur: dur, in: 0, out: dur, speed: 1, vol: 1, filter: 'none', b: 0, c: 0, s: 0, fit: 'cover', rot: 0, flip: false, zoom: 1, fade: false, fadeIn: false, fadeOut: false, trans: 'none', kb: 'none', vig: 0, thumb, file: null, capOn: true, cap: { pos: 'bottom', size: 6, color: '#ffffff' } };
 }
 async function addVideoFile(f) {
   const v = document.createElement('video');
@@ -614,13 +616,20 @@ function vPanel() {
       slider(el, { label, min: -100, max: 100, value: clip[k], def: 0, onInput: v => { clip[k] = v; drawFrame(); } });
     }
     slider(el, { label: '暗角', min: 0, max: 100, value: clip.vig || 0, def: 0, onInput: v => { clip.vig = v; drawFrame(); } });
-    el = group(root, 'clip.frame', '畫面（填滿、旋轉、放大、淡入淡出）');
+    el = group(root, 'clip.frame', '畫面（填滿、旋轉、放大、淡入、淡出）');
     chips(el, [['cover', '填滿畫面'], ['contain', '完整顯示'], ['blur', '模糊背景']], clip.fit, v => { clip.fit = v; drawFrame(); });
     el.append(h('div', { class: 'chips' },
       h('button', { class: 'btn', text: '向右轉 90°', onclick: () => { clip.rot = (clip.rot + 90) % 360; drawFrame(); } }),
       h('button', { class: 'btn', 'aria-pressed': String(clip.flip), text: '左右鏡像', onclick: () => { clip.flip = !clip.flip; vPanel(); drawFrame(); } })));
     slider(el, { label: '放大', min: 100, max: 300, step: 5, value: Math.round(clip.zoom * 100), def: 100, fmt: v => v + '%', onInput: v => { clip.zoom = v / 100; drawFrame(); } });
-    el.append(h('button', { class: 'btn wide', 'aria-pressed': String(clip.fade), text: '開頭結尾淡入淡出', onclick: () => { clip.fade = !clip.fade; vPanel(); drawFrame(); } }));
+    {
+      // 舊版只有一個「開頭結尾淡入淡出」，第一次碰到時拆成兩個獨立的開關
+      if (clip.fade) { clip.fadeIn = clip.fadeOut = true; clip.fade = false; }
+      const flip = key => { clip[key] = !clip[key]; vPanel(); drawFrame(); };
+      el.append(h('div', { class: 'chips' },
+        h('button', { class: 'btn', 'aria-pressed': String(!!clip.fadeIn), text: '開頭淡入', title: '這一段開始時，畫面從黑慢慢變亮', onclick: () => flip('fadeIn') }),
+        h('button', { class: 'btn', 'aria-pressed': String(!!clip.fadeOut), text: '結尾淡出', title: '這一段結束時，畫面慢慢變暗到全黑', onclick: () => flip('fadeOut') })));
+    }
     el = root;
     el.append(h('button', { class: 'btn wide', text: '把這個畫面送到「修圖」', onclick: () => { const L = locate(Math.min(V.t, Math.max(0, totalDur() - 0.001))); if (L.clip !== clip) seek(clipStart(clip) + 0.05); snapshotToPhoto(); } }));
     el.append(h('button', { class: 'btn ghost wide', text: '回到影片設定', onclick: () => { V.sel = null; rebuildTL(); vPanel(); } }));
@@ -975,7 +984,7 @@ function elId(el) {
   return elIds.get(el);
 }
 function vKey() {
-  return JSON.stringify([V.clips.map(c => [c.id, elId(c.el), c.in, c.out, c.speed, c.vol, c.filter, c.b, c.c, c.s, c.fit, c.rot, c.flip, c.zoom, c.fade, c.trans, c.kb, c.vig, c.capOn, c.cap]), V.texts, V.aspect]);
+  return JSON.stringify([V.clips.map(c => [c.id, elId(c.el), c.in, c.out, c.speed, c.vol, c.filter, c.b, c.c, c.s, c.fit, c.rot, c.flip, c.zoom, c.fade, c.fadeIn, c.fadeOut, c.trans, c.kb, c.vig, c.capOn, c.cap]), V.texts, V.aspect]);
 }
 function vCommit() {
   const k = vKey();
