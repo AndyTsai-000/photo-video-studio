@@ -47,7 +47,17 @@ async function searchMusic(q) {
   renderMusicDialog();
 }
 
+// 預設把選好的音樂放進剪輯；智能剪片開啟這個視窗時會傳入自己的接收函式
+let musicCb = null;
 function finishMusic(file, meta) {
+  if (musicCb) {
+    const cb = musicCb;
+    musicCb = null;
+    stopMusicPreview();
+    $('#dlg').hidden = true;
+    cb(file, meta);
+    return;
+  }
   pause();
   setMusicFile(file, meta);
   stopMusicPreview();
@@ -94,7 +104,8 @@ async function loadMusicUrl(raw) {
   }
 }
 
-function openMusicDialog() {
+function openMusicDialog(cb) {
+  musicCb = typeof cb === 'function' ? cb : null;
   MS.urlMsg = '';
   renderMusicDialog();
   $('#dlg').hidden = false;
