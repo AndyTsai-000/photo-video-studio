@@ -918,7 +918,7 @@ function snapshotToPhoto() {
   setPhotoImage(shot);
   P.link = link;
   setMode('photo');
-  toast(link.kind === 'image' ? '已把這張圖片送到修圖。修好後按右上角「更新回剪輯」，剪輯裡的這張圖就會換成修好的。'
+  toast(link.kind === 'image' ? '已把這張圖片送到修圖。修好後按右上角「更新回剪輯」，手動剪輯裡的這張圖就會換成修好的。'
     : '已把這一格畫面送到修圖。修好後按右上角「更新回剪輯」，會在同一個位置插入修好的定格畫面。', 6500);
 }
 function updateVideoFromPhoto() {
@@ -934,7 +934,7 @@ function updateVideoFromPhoto() {
     const old = src.el;
     for (const c of V.clips) if (c.el === old) { c.el = out; c.thumb = thumb; }
     at = clipStart(src) + 0.05;
-    msg = '剪輯裡的這張圖片已經換成修好的版本';
+    msg = '手動剪輯裡的這張圖片已經換成修好的版本';
   } else if (still) {
     still.el = out; still.thumb = thumb;
     at = clipStart(still) + 0.05;

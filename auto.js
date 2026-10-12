@@ -1,4 +1,4 @@
-// 智能剪輯：使用者丟素材、選風格和比例，程式自動排出一支影片（結果放進「剪輯」，可以再微調或直接匯出）
+// 智能剪輯：使用者丟素材、選風格和比例，程式自動排出一支影片（結果放進「手動剪輯」，可以再微調或直接匯出）
 // 這裡的「智能」是規則加分析：聽聲音挑影片裡最有內容的片段、抓配樂節拍來決定每段長度、
 // 依風格套轉場／濾鏡／鏡頭推移。不是生成式 AI，不會憑空產生畫面。
 const AUTO_STYLES = [
@@ -216,7 +216,7 @@ function autoPanel() {
   if (AU.music) chips(c, [['low', '調小聲（襯在配樂下）'], ['keep', '保留原音量'], ['mute', '靜音']], AU.audio, v => { AU.audio = v; });
   else chips(c, [['keep', '保留'], ['mute', '靜音']], AU.audio === 'mute' ? 'mute' : 'keep', v => { AU.audio = v; });
 
-  c = card('5　文字', '影片裡有人說話時，會自動聽出來變成字幕。聽錯的字之後在「剪輯」點那句字幕就能改。');
+  c = card('5　文字', '影片裡有人說話時，會自動聽出來變成字幕。聽錯的字之後在「手動剪輯」點那句字幕就能改。');
   const field = (id, label, key, ph) => {
     const input = h('input', { type: 'text', id, placeholder: ph, maxlength: 40 });
     input.value = AU[key];
@@ -228,8 +228,8 @@ function autoPanel() {
   c.append(h('button', { class: 'btn wide', 'aria-pressed': String(AU.captions), text: AU.captions ? '說話聲自動變成字幕：開' : '說話聲自動變成字幕：關', onclick: () => { AU.captions = !AU.captions; autoPanel(); } }));
 
   const go = h('section', { class: 'auto-card auto-go' });
-  if (V.clips.length) go.append(h('p', { text: '「剪輯」裡目前有 ' + V.clips.length + ' 個片段，開始後會被這次的結果取代（之後可以在剪輯按「復原」找回來）。' }));
+  if (V.clips.length) go.append(h('p', { text: '「手動剪輯」裡目前有 ' + V.clips.length + ' 個片段，開始後會被這次的結果取代（之後可以在手動剪輯按「復原」找回來）。' }));
   go.append(h('button', { class: 'btn primary wide big', disabled: AU.busy || !AU.items.length, text: AU.busy ? '正在剪輯…' : '開始智能剪輯', onclick: runAutoEdit }));
-  go.append(h('p', { text: '完成後會自動切到「剪輯」，可以先預覽、微調，再按「匯出」存成影片。' }));
+  go.append(h('p', { text: '完成後會自動切到「手動剪輯」，可以先預覽、微調，再按「匯出」存成影片。' }));
   el.append(go);
 }

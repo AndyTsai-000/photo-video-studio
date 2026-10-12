@@ -446,7 +446,7 @@ async function avatarExport(toVideo) {
       setMode('video');
       await addMedia([new File([blob], '虛擬人.mp4', { type: 'video/mp4' })]);
       STT.auto = was;
-      toast('已把虛擬人影片加進剪輯');
+      toast('已把虛擬人影片加進手動剪輯');
     } else saveFile('虛擬人.mp4', blob);
   } catch (e) {
     aiStatus(null);
@@ -510,7 +510,7 @@ function avatarPanel() {
   chips(el, AV_ASPECTS, AV.aspect, v => { AV.aspect = v; avatarRefresh(); });
 
   root.append(h('button', { class: 'btn primary wide', disabled: AV.busy || !AV.audio, text: '匯出成影片（MP4）', onclick: () => avatarExport(false) }));
-  root.append(h('button', { class: 'btn wide', disabled: AV.busy || !AV.audio, text: '送到「剪輯」繼續編輯', onclick: () => avatarExport(true) }));
+  root.append(h('button', { class: 'btn wide', disabled: AV.busy || !AV.audio, text: '送到「手動剪輯」繼續編輯', onclick: () => avatarExport(true) }));
   if (!AV.audio) root.append(h('p', { text: '先產生語音，才能預覽和匯出。' }));
   root.append(h('p', { text: '請只使用你自己的照片，或已經取得本人同意的照片。' }));
 }
