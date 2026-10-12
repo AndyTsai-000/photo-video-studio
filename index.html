@@ -58,6 +58,8 @@
         </button>
       </div>
       <p class="home-drop">也可以直接把照片或影片拖進這個畫面：一張照片進修圖，多張進拼圖，影片進手動剪輯。</p>
+      <p class="home-drop" id="inAppWarn" hidden></p>
+      <p class="home-drop" id="verLine"></p>
     </div>
   </section>
 
@@ -195,7 +197,8 @@
 <script>
   // 每次改版把 VERSION 加一。只有在 GitHub Pages 才加版本參數，避免瀏覽器繼續用舊的程式檔
   (function () {
-    var VERSION = '34', bust = /github\.io$/.test(location.hostname) ? '?v=' + VERSION : '';
+    var VERSION = '36', bust = /github\.io$/.test(location.hostname) ? '?v=' + VERSION : '';
+    window.APP_VERSION = VERSION;
     if (bust) {
       var css = document.createElement('link');
       css.rel = 'stylesheet'; css.href = 'app.css' + bust;

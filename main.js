@@ -200,6 +200,25 @@ window.addEventListener('keydown', e => {
 
 new ResizeObserver(refit).observe($('#app'));
 
+// 首頁最下面顯示版本；用 LINE 等內建瀏覽器開啟時提醒換瀏覽器
+$('#verLine').textContent = '版本 ' + (window.APP_VERSION || '?');
+if (inAppBrowser()) {
+  $('#inAppWarn').hidden = false;
+  $('#inAppWarn').classList.add('warn');
+  $('#inAppWarn').textContent = '你現在是用 ' + inAppBrowser() + ' 內建的瀏覽器開啟，匯出的檔案常常存不下來。請點右上角的選單，選「用預設瀏覽器開啟」（Safari 或 Chrome）。';
+}
+// 瀏覽器有時會留著舊的首頁檔，導致看到的還是舊版：開啟時向伺服器確認一次，有新版就自動重新載入
+if (/github\.io$/.test(location.hostname)) {
+  fetch(location.pathname + '?check=' + Date.now(), { cache: 'no-store' }).then(r => r.text()).then(html => {
+    const m = /var VERSION = '(\d+)'/.exec(html);
+    if (!m || m[1] === window.APP_VERSION) return;
+    let tried = '';
+    try { tried = sessionStorage.getItem('reloadedFor') || ''; sessionStorage.setItem('reloadedFor', m[1]); } catch (e) { tried = ''; }
+    if (tried !== m[1]) location.replace(location.pathname + '?v=' + m[1]);
+    else $('#verLine').textContent += '（有新版 ' + m[1] + '，請關掉這個分頁重新開啟）';
+  }).catch(() => {});
+}
+
 initPhoto();
 initCollage();
 initVideo();

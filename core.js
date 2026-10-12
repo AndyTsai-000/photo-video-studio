@@ -58,7 +58,7 @@ function fit(canvas, zoom) {
 }
 
 // ── 存檔：在 Claude 的頁面裡走 downloads 能力，其他地方用一般下載 ──
-async function saveFile(filename, blob) {
+async function saveFile(filename, blob, note) {
   if (!blob) { toast('產生檔案失敗'); return; }
   if (window.claude && window.claude.use) {
     let d = null;
@@ -75,8 +75,35 @@ async function saveFile(filename, blob) {
   }
   // 手機、平板：先問要存到相簿／分享到其他 App，還是下載成檔案
   const file = new File([blob], filename, { type: blob.type || 'application/octet-stream' });
-  if (isTouchDevice() && navigator.share && navigator.canShare && navigator.canShare({ files: [file] })) { openSaveDialog(file); return; }
+  if (isTouchDevice() && /^(image|video)\//.test(file.type)) {
+    // 網頁不能直接寫進相簿，這裡做到各系統允許的最短路徑：
+    //   Android：直接存檔（進「下載」資料夾，相簿 App 的「下載」相簿看得到），不跳視窗
+    //   iPhone／iPad：直接叫出系統選單，點「儲存影像／儲存影片」就進相簿
+    // 需要提醒（相容性較差的格式、LINE 內建瀏覽器）或系統選單叫不出來時，才顯示自己的視窗
+    if (note || inAppBrowser()) { openSaveDialog(file, note); return; }
+    if (!isIOS()) {
+      downloadBlob(filename, blob);
+      toast('已存到手機。打開相簿，在「下載」相簿裡可以看到。', 6000);
+      return;
+    }
+    let canShare = false;
+    try { canShare = !!(navigator.share && navigator.canShare && navigator.canShare({ files: [file] })); } catch (e) { canShare = false; }
+    // 匯出很快（圖片）時，使用者剛按過按鈕，可以直接叫出選單；影片要錄很久，系統會要求再按一次
+    if (canShare && (!navigator.userActivation || navigator.userActivation.isActive)) {
+      try { await navigator.share({ files: [file] }); toast('完成'); return; } catch (e) { /* 被取消或被系統擋下：改顯示視窗，讓使用者可以再按一次 */ }
+    }
+    openSaveDialog(file, note);
+    return;
+  }
   downloadBlob(filename, blob);
+}
+// LINE、Facebook、Instagram 點連結時開的是它們自己內建的瀏覽器，這種瀏覽器常常不能下載、也不能分享檔案
+function inAppBrowser() {
+  const m = /\b(Line|FBAN|FBAV|FB_IAB|Instagram|MicroMessenger)\b/i.exec(navigator.userAgent);
+  return m ? ({ line: 'LINE', fban: 'Facebook', fbav: 'Facebook', fb_iab: 'Facebook', instagram: 'Instagram', micromessenger: '微信' })[m[1].toLowerCase()] : '';
+}
+function isIOS() {
+  return /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 }
 function isTouchDevice() {
   return !!(window.matchMedia && window.matchMedia('(pointer: coarse)').matches);
@@ -93,17 +120,23 @@ function downloadBlob(filename, blob) {
 }
 // 匯出完成後的視窗（手機、平板）。分享一定要由使用者親手按按鈕觸發，
 // 所以不能在匯出跑完時自動跳出系統的分享選單
-function openSaveDialog(file) {
+function openSaveDialog(file, note) {
   const card = $('#dlgCard'), url = URL.createObjectURL(file), isVideo = file.type.startsWith('video/'), isImage = file.type.startsWith('image/');
-  const ios = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  const ios = isIOS();
   const close = () => { $('#dlg').hidden = true; setTimeout(() => URL.revokeObjectURL(url), 30000); };
   card.style.maxWidth = '';
   card.replaceChildren();
   card.append(h('h2', { text: isVideo ? '影片做好了' : isImage ? '圖片做好了' : '檔案做好了' }));
   if (isImage) card.append(h('img', { class: 'save-preview', src: url, alt: '' }));
   else if (isVideo) card.append(h('video', { class: 'save-preview', src: url, controls: true, playsinline: true, preload: 'metadata' }));
-  card.append(h('button', {
-    class: 'btn primary wide big', text: '儲存到相簿或分享',
+  if (note) card.append(h('p', { class: 'warn', text: note }));
+  const app = inAppBrowser();
+  if (app) card.append(h('p', { class: 'warn', text: '你現在是用 ' + app + ' 內建的瀏覽器開啟，這裡常常不能儲存或分享檔案。請點右上角的選單，選「用預設瀏覽器開啟」（Safari 或 Chrome）再匯出一次。' }));
+  let canShare = false;
+  try { canShare = !!(navigator.share && navigator.canShare && navigator.canShare({ files: [file] })); } catch (e) { canShare = false; }
+  if (!canShare) card.append(h('p', { text: '這個瀏覽器不能直接叫出分享選單，請用下面的「下載成檔案」。' + (isImage ? '也可以長按上面的圖片，選「加入照片」或「儲存影像」。' : '') }));
+  else card.append(h('button', {
+    class: 'btn primary wide big', text: '存到相簿',
     onclick: async () => {
       try {
         await navigator.share({ files: [file] });
@@ -116,11 +149,11 @@ function openSaveDialog(file) {
       }
     }
   }));
-  card.append(h('p', {
-    text: ios ? '按下後會跳出系統選單：選「儲存' + (isVideo ? '影片' : '影像') + '」會存進相簿，也可以直接選 LINE、Instagram、訊息等 App 傳出去。'
+  if (canShare) card.append(h('p', {
+    text: ios ? '按下後會跳出系統選單，點「儲存' + (isVideo ? '影片' : '影像') + '」就會進相簿。同一個選單也可以直接傳到 LINE、Instagram。'
       : '按下後會跳出系統選單，可以選 LINE、Instagram、相簿、雲端硬碟等 App。'
   }));
-  card.append(h('button', { class: 'btn wide', text: '下載成檔案', onclick: () => { downloadBlob(file.name, file); close(); } }));
+  card.append(h('button', { class: 'btn wide' + (canShare ? '' : ' primary big'), text: '下載成檔案', onclick: () => { downloadBlob(file.name, file); close(); } }));
   card.append(h('p', { text: ios ? '下載的檔案會放在「檔案」App 的下載項目裡。' : '下載的檔案會放在「下載」資料夾，通常相簿裡也看得到。' }));
   card.append(h('div', { class: 'actions' }, h('button', { class: 'btn', text: '關閉', onclick: close })));
   $('#dlg').hidden = false;

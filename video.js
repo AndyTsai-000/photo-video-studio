@@ -854,8 +854,8 @@ function exportWithRecorder(fps) {
     const cancelled = V.cancelled;
     endExportUi();
     if (cancelled) { toast('已取消匯出'); return; }
-    saveFile('剪輯作品.' + ext, new Blob(chunks, { type: 'video/' + ext }));
-    toast('這個瀏覽器只能匯出相容性較差的格式，傳到 LINE 可能會變成檔案。建議改用電腦版 Chrome 或 Edge 匯出。', 7000);
+    saveFile('剪輯作品.' + ext, new Blob(chunks, { type: 'video/' + ext }), '這個瀏覽器不支援標準的影片編碼，這支影片是用相容性較差的格式（' + ext.toUpperCase() + '）做的，傳到 LINE 可能會變成檔案、存不進相簿。建議改用電腦版 Chrome 或 Edge 匯出。');
+    if (!isTouchDevice()) toast('這個瀏覽器只能匯出相容性較差的格式，傳到 LINE 可能會變成檔案。建議改用電腦版 Chrome 或 Edge 匯出。', 7000);
   };
   V.rec = rec;
   setTimeout(() => { if (V.exporting && V.rec === rec) { rec.start(1000); play(); } }, 500);
