@@ -47,7 +47,7 @@ async function searchMusic(q) {
   renderMusicDialog();
 }
 
-// 預設把選好的音樂放進剪輯；智能剪片開啟這個視窗時會傳入自己的接收函式
+// 預設把選好的音樂放進剪輯；智能剪輯開啟這個視窗時會傳入自己的接收函式
 let musicCb = null;
 function finishMusic(file, meta) {
   if (musicCb) {

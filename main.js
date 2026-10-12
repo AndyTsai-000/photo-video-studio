@@ -143,7 +143,7 @@ function drawHomePreviews() {
   C.imgs = keep;
   cover('#homeCollage', col);
   cover('#homeVideo', makeSample(2, 480, 300));
-  // 智能剪片的示意圖：幾張素材排成一條，像被剪在一起
+  // 智能剪輯的示意圖：幾張素材排成一條，像被剪在一起
   const strip = mk(480, 300), sx = strip.getContext('2d');
   sx.fillStyle = '#15131a'; sx.fillRect(0, 0, 480, 300);
   [3, 1, 0, 2].forEach((v, i) => { sx.save(); sx.translate(70 + i * 113, 150); sx.rotate((i - 1.5) * 0.07); sx.drawImage(makeSample(v, 150, 220), -75, -110); sx.restore(); });

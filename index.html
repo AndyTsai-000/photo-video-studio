@@ -12,7 +12,7 @@
       <button role="tab" data-mode="photo" aria-selected="false">修圖</button>
       <button role="tab" data-mode="collage" aria-selected="false">拼圖</button>
       <button role="tab" data-mode="video" aria-selected="false">剪輯</button>
-      <button role="tab" data-mode="auto" aria-selected="false">智能剪片</button>
+      <button role="tab" data-mode="auto" aria-selected="false">智能剪輯</button>
       <button role="tab" data-mode="avatar" aria-selected="false">虛擬人</button>
     </nav>
     <div class="bar-actions" id="barActions" hidden>
@@ -31,7 +31,7 @@
       <div class="home-features">
         <button class="home-card home-feature" data-go="auto">
           <canvas id="homeAuto" width="480" height="300"></canvas>
-          <strong>AI 智能剪片</strong>
+          <strong>AI 智能剪輯</strong>
           <span>放進照片和影片，選好風格、比例、配樂，按一下就自動挑片段、對節拍、加轉場和字幕，剪成一支影片。</span>
         </button>
         <button class="home-card home-feature" data-go="avatar">
@@ -195,7 +195,7 @@
 <script>
   // 每次改版把 VERSION 加一。只有在 GitHub Pages 才加版本參數，避免瀏覽器繼續用舊的程式檔
   (function () {
-    var VERSION = '29', bust = /github\.io$/.test(location.hostname) ? '?v=' + VERSION : '';
+    var VERSION = '30', bust = /github\.io$/.test(location.hostname) ? '?v=' + VERSION : '';
     if (bust) {
       var css = document.createElement('link');
       css.rel = 'stylesheet'; css.href = 'app.css' + bust;

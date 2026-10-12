@@ -1,4 +1,4 @@
-// 智能剪片：使用者丟素材、選風格和比例，程式自動排出一支影片（結果放進「剪輯」，可以再微調或直接匯出）
+// 智能剪輯：使用者丟素材、選風格和比例，程式自動排出一支影片（結果放進「剪輯」，可以再微調或直接匯出）
 // 這裡的「智能」是規則加分析：聽聲音挑影片裡最有內容的片段、抓配樂節拍來決定每段長度、
 // 依風格套轉場／濾鏡／鏡頭推移。不是生成式 AI，不會憑空產生畫面。
 const AUTO_STYLES = [
@@ -170,7 +170,7 @@ async function runAutoEdit() {
   } catch (e) {
     STT.auto = sttWas;
     aiStatus(null);
-    toast(e.message === 'empty' ? '這些檔案都讀不了，可能是瀏覽器不支援的格式。' : '剪片時發生問題：' + (e.message || '未知原因'), 5000);
+    toast(e.message === 'empty' ? '這些檔案都讀不了，可能是瀏覽器不支援的格式。' : '剪輯時發生問題：' + (e.message || '未知原因'), 5000);
   }
   AU.busy = false;
   autoPanel();
@@ -181,7 +181,7 @@ function autoPanel() {
   if (!el) return;
   el.replaceChildren();
   const card = (title, hint) => { const c = h('section', { class: 'auto-card' }, h('h2', { text: title }), hint ? h('p', { text: hint }) : null); el.append(c); return c; };
-  el.append(h('h1', { text: 'AI 智能剪片' }), h('p', { class: 'home-lead', text: '放進照片或影片，選好風格和比例，程式會自動挑片段、排順序、加轉場和配樂，剪成一支影片。' }));
+  el.append(h('h1', { text: 'AI 智能剪輯' }), h('p', { class: 'home-lead', text: '放進照片或影片，選好風格和比例，程式會自動挑片段、排順序、加轉場和配樂，剪成一支影片。' }));
 
   let c = card('1　素材', AU.items.length ? '已加入 ' + AU.items.length + ' 個。會照下面設定的順序排列。' : '照片、影片都可以，可以一次選很多個，也可以直接拖進來。');
   if (AU.items.length) {
@@ -229,7 +229,7 @@ function autoPanel() {
 
   const go = h('section', { class: 'auto-card auto-go' });
   if (V.clips.length) go.append(h('p', { text: '「剪輯」裡目前有 ' + V.clips.length + ' 個片段，開始後會被這次的結果取代（之後可以在剪輯按「復原」找回來）。' }));
-  go.append(h('button', { class: 'btn primary wide big', disabled: AU.busy || !AU.items.length, text: AU.busy ? '正在剪片…' : '開始智能剪片', onclick: runAutoEdit }));
+  go.append(h('button', { class: 'btn primary wide big', disabled: AU.busy || !AU.items.length, text: AU.busy ? '正在剪輯…' : '開始智能剪輯', onclick: runAutoEdit }));
   go.append(h('p', { text: '完成後會自動切到「剪輯」，可以先預覽、微調，再按「匯出」存成影片。' }));
   el.append(go);
 }
