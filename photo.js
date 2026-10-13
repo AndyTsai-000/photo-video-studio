@@ -46,8 +46,24 @@ const FONTS = {
 };
 const STICKERS = ['❤️', '⭐', '✨', '🔥', '🌸', '🎀', '👑', '😎', '😍', '🥰', '😂', '🤩', '🎉', '🎈', '🌈', '☀️', '🌙', '☁️', '🍀', '🐱', '🐶', '🦋', '💬', '💯', '👍', '✌️', '🎂', '☕', '🍓', '📍', '🎵', '💡'];
 const EMOJI_FONT = '"Segoe UI Emoji","Apple Color Emoji","Noto Color Emoji",sans-serif';
-const PHOTO_TOOLS = [['adjust', '調整'], ['filter', '濾鏡'], ['beauty', '美顏'], ['retouch', '細修'], ['cutout', '去背'], ['remove', '清除'], ['wm', '去除浮水印'], ['crop', '裁切'], ['text', '文字'], ['sticker', '貼圖'], ['brush', '畫筆'], ['frame', '邊框']];
+const PHOTO_TOOLS = [['adjust', '調整'], ['filter', '濾鏡'], ['beauty', '美顏'], ['retouch', '細修'], ['cutout', '去背'], ['remove', '清除'], ['wm', '去除浮水印'], ['crop', '裁切'], ['text', '文字'], ['sticker', '貼圖'], ['shape', '形狀'], ['brush', '畫筆'], ['frame', '邊框']];
 
+// 左邊工具列的小圖示（24×24 的線條圖）
+const TOOL_ICONS = {
+  adjust: '<path d="M4 7h9M19 7h1M4 17h1M11 17h9"/><circle cx="16" cy="7" r="2.5"/><circle cx="8" cy="17" r="2.5"/>',
+  filter: '<circle cx="9" cy="9.5" r="5"/><circle cx="15" cy="9.5" r="5"/><circle cx="12" cy="14.5" r="5"/>',
+  beauty: '<circle cx="12" cy="12" r="8.5"/><path d="M8.5 14.2c1 1.3 2.2 1.9 3.5 1.9s2.5-.6 3.5-1.9M9 9.8v.4M15 9.8v.4"/>',
+  retouch: '<path d="M4.5 19.5L15 9M13.2 7.2l3.6 3.6M19 3v3.4M17.3 4.7h3.4M6.5 4.5v2.4M5.3 5.7h2.4M19 14v2.4M17.8 15.2h2.4"/>',
+  cutout: '<path d="M4 8V4h4M16 4h4v4M20 16v4h-4M8 20H4v-4"/><circle cx="12" cy="10" r="2.6"/><path d="M7.6 17.2c.7-2.3 2.2-3.5 4.4-3.5s3.7 1.2 4.4 3.5"/>',
+  remove: '<path d="M3.8 15.2l9-9 6 6-6.8 6.8H8z"/><path d="M9.3 9.7l6 6M12 19h8.2"/>',
+  wm: '<path d="M12 3.5c3 3.6 5 6.3 5 9a5 5 0 0 1-10 0c0-2.7 2-5.4 5-9z"/><path d="M4.5 20L19.5 5"/>',
+  crop: '<path d="M7 3v14h14M3 7h14v14"/>',
+  text: '<path d="M5 7V4.5h14V7M12 4.5v15M9 19.5h6"/>',
+  sticker: '<path d="M12 3.6l2.6 5.3 5.8.8-4.2 4.1 1 5.8-5.2-2.7-5.2 2.7 1-5.8-4.2-4.1 5.8-.8z"/>',
+  shape: '<rect x="3.5" y="3.5" width="9.5" height="9.5" rx="1.5"/><circle cx="15.5" cy="15.5" r="5"/>',
+  brush: '<path d="M4 20l1-4.2L16 4.8l3.2 3.2L8.2 19z"/><path d="M13.6 7.2l3.2 3.2"/>',
+  frame: '<rect x="3.5" y="3.5" width="17" height="17" rx="2"/><rect x="7.5" y="7.5" width="9" height="9"/>'
+};
 const P = {
   base: null, paint: null, objects: [], sel: null,
   adj: {}, preset: 'none', presetAmt: 100,
@@ -551,7 +567,26 @@ function drawFramed(ctx, wc, W, H, ix, iy, iw, ih, b, bt) {
   }
 }
 
-// ── 物件（文字、貼圖）──
+// ── 物件（文字、貼圖、形狀）──
+const SHAPES = [['arrow', '箭頭'], ['line', '直線'], ['rect', '方框'], ['ellipse', '圓框']];
+const toolOf = o => (o.type === 'text' ? 'text' : o.type === 'shape' ? 'shape' : 'sticker');
+// 形狀的線條粗細是相對於自己的寬度，放大縮小時粗細跟著變
+const shapeLw = o => Math.max(1, o.size * o.lw / 100);
+function drawShape(ctx, o) {
+  const b = objBox(o), lw = shapeLw(o), w = o.size;
+  ctx.strokeStyle = ctx.fillStyle = o.color;
+  ctx.lineWidth = lw; ctx.lineCap = ctx.lineJoin = 'round';
+  ctx.beginPath();
+  if (o.kind === 'arrow' || o.kind === 'line') {
+    const head = o.kind === 'arrow' ? Math.min(w * 0.45, lw * 3.2) : 0;
+    ctx.moveTo(-w / 2 + lw / 2, 0); ctx.lineTo(w / 2 - (head ? head * 0.8 : lw / 2), 0); ctx.stroke();
+    if (head) { ctx.beginPath(); ctx.moveTo(w / 2, 0); ctx.lineTo(w / 2 - head, -head * 0.62); ctx.lineTo(w / 2 - head, head * 0.62); ctx.closePath(); ctx.fill(); }
+    return;
+  }
+  if (o.kind === 'rect') roundRectPath(ctx, -b.w / 2 + lw / 2, -b.h / 2 + lw / 2, b.w - lw, b.h - lw, lw);
+  else ctx.ellipse(0, 0, Math.max(1, b.w / 2 - lw / 2), Math.max(1, b.h / 2 - lw / 2), 0, 0, Math.PI * 2);
+  if (o.fill) ctx.fill(); else ctx.stroke();
+}
 const measureCtx = mk(4, 4).getContext('2d');
 function objFont(o) {
   if (o.type === 'sticker') return o.size + 'px ' + EMOJI_FONT;
@@ -559,6 +594,7 @@ function objFont(o) {
 }
 function objBox(o) {
   if (o.type === 'image') return { w: o.size, h: o.size * o.cv.height / o.cv.width };
+  if (o.type === 'shape') return { w: o.size, h: o.kind === 'arrow' || o.kind === 'line' ? Math.max(shapeLw(o) * 4, o.size * 0.12) : o.size * o.ratio / 100 };
   measureCtx.font = objFont(o);
   const lines = String(o.text).split('\n');
   let w = 0;
@@ -578,6 +614,7 @@ function drawObject(ctx, o, s) {
     ctx.restore();
     return;
   }
+  if (o.type === 'shape') { drawShape(ctx, o); ctx.restore(); return; }
   ctx.font = objFont(o);
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
@@ -1030,7 +1067,7 @@ PV.addEventListener('pointerdown', e => {
   const o = hitObject(p);
   if (o) {
     drag = { type: 'obj', o, dx: p.x - o.x, dy: p.y - o.y, moved: false };
-    if (P.sel !== o) { P.sel = o; showTool(o.type === 'text' ? 'text' : 'sticker'); }
+    if (P.sel !== o) { P.sel = o; showTool(toolOf(o)); }
   } else {
     drag = null;
     if (P.sel) { P.sel = null; showTool(P.tool); }
@@ -1079,7 +1116,7 @@ function addObject(o) {
   P.objects.push(o);
   P.sel = o;
   loadFontFor(o);
-  showTool(o.type === 'text' ? 'text' : 'sticker');
+  showTool(toolOf(o));
   requestRender();
   if (o.type === 'text') selectAllIn('#textEdit');
 }
@@ -1092,7 +1129,7 @@ function deleteSelected() {
   requestRender();
 }
 function objSliders(el, o, root) {
-  const m = Math.min(P.base.width, P.base.height), name = { text: '文字', sticker: '貼圖', image: '圖片' }[o.type];
+  const m = Math.min(P.base.width, P.base.height), name = { text: '文字', sticker: '貼圖', image: '圖片', shape: '形狀' }[o.type];
   slider(el, { label: '大小', min: 2, max: o.type === 'image' ? 150 : 60, value: Math.round(o.size / m * 100), onStart: pushHistory, onInput: v => { o.size = m * v / 100; requestRender(); } });
   slider(el, { label: '旋轉', min: -180, max: 180, value: Math.round(((o.rot + 180) % 360 + 360) % 360 - 180), def: 0, fmt: v => v + '°', onStart: pushHistory, onInput: v => { o.rot = v; requestRender(); } });
   slider(el, { label: '不透明度', min: 10, max: 100, value: Math.round((o.alpha == null ? 1 : o.alpha) * 100), def: 100, fmt: v => v + '%', onStart: pushHistory, onInput: v => { o.alpha = v / 100; requestRender(); } });
@@ -1408,9 +1445,29 @@ const PANELS = {
         } catch (e) { toast('無法讀取 ' + f.name); }
       }
     }));
-    const o = P.sel && P.sel.type !== 'text' ? P.sel : null;
+    const o = P.sel && P.sel.type !== 'text' && P.sel.type !== 'shape' ? P.sel : null;
     if (o) objSliders(group(root, 'sticker.adj', '調整選取的' + (o.type === 'image' ? '圖片' : '貼圖')), o, root);
     else el.append(h('p', { text: '點一個貼圖放到圖上，再拖到想要的位置。' }));
+  },
+  shape(el) {
+    const root = el, m = Math.min(P.base.width, P.base.height);
+    el.append(h('h2', { text: '形狀' }));
+    el.append(h('div', { class: 'btn-row four' }, SHAPES.map(([kind, label]) => h('button', {
+      class: 'btn', text: label,
+      onclick: () => addObject({ type: 'shape', kind, x: P.base.width / 2, y: P.base.height / 2, size: m * 0.3, ratio: kind === 'rect' ? 60 : 100, lw: 6, rot: 0, color: P.shapeColor || '#ff3c5a', fill: false, alpha: 1 })
+    }))));
+    const o = P.sel && P.sel.type === 'shape' ? P.sel : null;
+    if (!o) { el.append(h('p', { text: '點上面的形狀放到圖上，再拖到想標示的地方。適合在截圖上畫重點、指出位置。' })); return; }
+    const box = o.kind === 'rect' || o.kind === 'ellipse';
+    el.append(h('h3', { text: '顏色' }));
+    swatches(el, ['#ff3c5a', '#ffd24a', '#ffffff', '#1a1a1a', '#62d2c6', '#6b8cff'], o.color, c => { o.color = P.shapeColor = c; requestRender(); });
+    slider(el, { label: box ? '寬度' : '長度', min: 3, max: 150, value: Math.round(o.size / m * 100), onStart: pushHistory, onInput: v => { o.size = m * v / 100; requestRender(); } });
+    if (box) slider(el, { label: '高度', min: 10, max: 300, value: o.ratio, def: 100, fmt: v => v + '%', onStart: pushHistory, onInput: v => { o.ratio = v; requestRender(); } });
+    slider(el, { label: '線條粗細', min: 1, max: 20, value: o.lw, def: 6, onStart: pushHistory, onInput: v => { o.lw = v; requestRender(); } });
+    slider(el, { label: '旋轉', min: -180, max: 180, value: Math.round(((o.rot + 180) % 360 + 360) % 360 - 180), def: 0, fmt: v => v + '°', onStart: pushHistory, onInput: v => { o.rot = v; requestRender(); } });
+    if (box) el.append(h('button', { class: 'btn wide', 'aria-pressed': String(!!o.fill), text: '填滿顏色', onclick: () => { pushHistory(); o.fill = !o.fill; showTool('shape'); requestRender(); } }));
+    slider(el, { label: '不透明度', min: 10, max: 100, value: Math.round((o.alpha == null ? 1 : o.alpha) * 100), def: 100, fmt: v => v + '%', onStart: pushHistory, onInput: v => { o.alpha = v / 100; requestRender(); } });
+    root.append(h('button', { class: 'btn danger wide', text: '刪除這個形狀', onclick: deleteSelected }));
   },
   brush(el) {
     el.append(h('h2', { text: '畫筆' }));
@@ -1462,7 +1519,10 @@ function showTool(tool) {
 function initPhoto() {
   const nav = $('#photoTools');
   for (const [key, label] of PHOTO_TOOLS) {
-    nav.append(h('button', { 'data-tool': key, 'aria-pressed': 'false', text: label, onclick: () => { P.sel = null; setPanelOff('photo', false); showTool(key); requestRender(); } }));
+    const b = h('button', { 'data-tool': key, 'aria-pressed': 'false', onclick: () => { P.sel = null; setPanelOff('photo', false); showTool(key); requestRender(); } });
+    b.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true">' + TOOL_ICONS[key] + '</svg>';
+    b.append(h('span', { text: label }));
+    nav.append(b);
   }
   $('#photoEmptyBtn').addEventListener('click', () => openForMode());
   $('#zoomIn').addEventListener('click', () => setZoom(P.zoom + 0.5));
@@ -1505,10 +1565,33 @@ function photoExportSize() {
   const ins = frameInsets(true), s = photoExportScale();
   return [Math.round((P.base.width + ins.l + ins.r) * s), Math.round((P.base.height + ins.t + ins.b) * s)];
 }
+// 前後對比圖：修圖前和修圖後並排成一張，直的照片左右排，橫的照片上下排
+const PHOTO_CMP = { on: false };
+function compareSheet(after) {
+  const before = mk(4, 4);
+  renderPhoto(before, 0, { final: true, raw: true, scale: photoExportScale() });
+  const w = after.width, hh = after.height, side = hh >= w, gap = Math.max(4, Math.round(Math.min(w, hh) * 0.012));
+  const k = Math.min(1, 8192 / (side ? w * 2 + gap : hh * 2 + gap));
+  const out = mk((side ? w * 2 + gap : w) * k, (side ? hh : hh * 2 + gap) * k), x = out.getContext('2d');
+  x.fillStyle = '#ffffff'; x.fillRect(0, 0, out.width, out.height);
+  x.imageSmoothingQuality = 'high';
+  const pw = w * k, ph = hh * k, g = gap * k, fs = Math.max(14, Math.round(Math.min(pw, ph) * 0.045));
+  [[before, '修圖前'], [after, '修圖後']].forEach(([cv, label], i) => {
+    const px = side ? i * (pw + g) : 0, py = side ? 0 : i * (ph + g);
+    x.drawImage(cv, px, py, pw, ph);
+    x.font = '700 ' + fs + 'px ' + FONTS.hei[1];
+    const tw = x.measureText(label).width + fs * 1.2;
+    x.fillStyle = 'rgba(0,0,0,.6)'; roundRectPath(x, px + fs * 0.6, py + fs * 0.6, tw, fs * 1.8, fs * 0.9); x.fill();
+    x.fillStyle = '#ffffff'; x.textAlign = 'center'; x.textBaseline = 'middle';
+    x.fillText(label, px + fs * 0.6 + tw / 2, py + fs * 1.5);
+  });
+  return out;
+}
 function exportPhoto() {
   if (!P.base) { toast('先開啟一張圖片'); return; }
-  const c = mk(4, 4);
+  let c = mk(4, 4);
   renderPhoto(c, 0, { final: true, scale: photoExportScale() });
+  if (PHOTO_CMP.on) c = compareSheet(c);
   // 透明背景只有 PNG、WebP 存得住，JPG 會變成黑底
   const opt = P.cut && P.cut.bg.type === 'transparent' && EXP.photo.fmt === 'jpg' ? { ...EXP.photo, fmt: 'png' } : EXP.photo;
   if (opt !== EXP.photo) toast('透明背景已自動改存成 PNG', 3500);

@@ -7,7 +7,7 @@ const MODES = ['home', 'auto', 'avatar', 'photo', 'collage', 'video'];
 const EXP = {
   photo: { fmt: 'jpg', q: 95, size: '0' },
   collage: { fmt: 'jpg', q: 95, side: '3600' },
-  video: { res: '1080', fps: '30', br: 'high' }
+  video: { res: '1080', fps: '30', br: 'high', fmt: 'mp4', gif: '480' }
 };
 try {
   const saved = JSON.parse(localStorage.getItem('exp') || '{}');
@@ -98,12 +98,25 @@ function openExportDialog() {
       pick('size', PHOTO_SIZES);
       const [w, hh] = photoExportSize();
       card.append(h('p', { text: '輸出 ' + w + ' × ' + hh + ' 像素。放大不會多出原圖沒有的細節，但文字和貼圖會以新尺寸重畫，邊緣比較銳利。' }));
+      card.append(h('h3', { text: '內容' }));
+      chips(card, [['off', '只有成品'], ['on', '前後對比圖']], PHOTO_CMP.on ? 'on' : 'off', v => { PHOTO_CMP.on = v === 'on'; openExportDialog(); });
+      if (PHOTO_CMP.on) card.append(h('p', { text: '修圖前和修圖後會並排成一張圖，適合分享修圖成果。' }));
     } else {
       pick('side', [['2400', '標準 2400'], ['3600', '高 3600'], ['4800', '超高 4800']]);
       const k = +e.side / COLLAGE_SIDE, [w, hh] = collageSize().map(v => Math.round(v * k));
       card.append(h('p', { text: '輸出 ' + w + ' × ' + hh + ' 像素。' }));
     }
+  } else if (e.fmt === 'gif') {
+    card.append(h('h3', { text: '格式' }));
+    pick('fmt', [['mp4', 'MP4 影片'], ['gif', 'GIF 動圖']]);
+    card.append(h('h3', { text: '大小' }));
+    pick('gif', [['320', '小 320'], ['480', '中 480'], ['640', '大 640']]);
+    const [w, hh] = gifDims(), sec = Math.min(GIF_MAX_SEC, totalDur());
+    card.append(h('p', { text: '輸出 ' + w + ' × ' + hh + '，每秒 ' + GIF_FPS + ' 格，長度 ' + fmtTime(sec) + '。GIF 沒有聲音，會自動重複播放，適合做成貼圖或傳到聊天室。' }));
+    if (totalDur() > GIF_MAX_SEC) card.append(h('p', { class: 'warn', text: 'GIF 檔案很大，只會做前 ' + GIF_MAX_SEC + ' 秒。想做別段，請先把影片剪到 ' + GIF_MAX_SEC + ' 秒以內。' }));
   } else {
+    card.append(h('h3', { text: '格式' }));
+    pick('fmt', [['mp4', 'MP4 影片'], ['gif', 'GIF 動圖']]);
     card.append(h('h3', { text: '解析度' }));
     pick('res', [['720', '720p'], ['1080', '1080p'], ['1440', '2K'], ['2160', '4K']]);
     card.append(h('h3', { text: '每秒格數' }));

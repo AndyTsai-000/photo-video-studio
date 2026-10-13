@@ -111,7 +111,7 @@ select {
 
 /* ── 三個模式共用的版面 ── */
 .mode { flex: 1; min-height: 0; display: grid; }
-#photo { grid-template-columns: 92px minmax(0, 1fr) 300px; }
+#photo { grid-template-columns: 116px minmax(0, 1fr) 300px; }
 #photo.is-empty { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); }
 #collage, #avatar { grid-template-columns: minmax(0, 1fr) 300px; }
 #avatar.is-empty { grid-template-columns: minmax(0, 1fr); }
@@ -357,7 +357,7 @@ input[type="color"] { width: 34px; height: 28px; padding: 0; border: 1px solid v
 .panel-off .panel-toggle::before { transform: translateX(2px) rotate(135deg); }
 .panel-off .panel { display: none; }
 .is-empty .panel-toggle { display: none; }
-#photo.panel-off { grid-template-columns: 92px minmax(0, 1fr); }
+#photo.panel-off { grid-template-columns: 116px minmax(0, 1fr); }
 #collage.panel-off, #video.panel-off { grid-template-columns: minmax(0, 1fr); }
 @media (max-width: 760px) {
   /* 手機上面板在畫面下方：收合把手是兩者之間的一條橫桿，點一下收起或展開 */
@@ -370,4 +370,75 @@ input[type="color"] { width: 34px; height: 28px; padding: 0; border: 1px solid v
   #collage.panel-off:not(.is-empty) { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) auto; }
   #video.panel-off:not(.is-empty) { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) auto auto auto; }
 }
+
+/* ── 細節：按下去的回饋、捲軸、工具圖示、並排按鈕 ── */
+* { scrollbar-width: thin; scrollbar-color: var(--line) transparent; }
+.btn, .modes button, .tools button, .auto-style, .thumbs button, .stickers button, .layouts button, .group > summary {
+  transition: background-color .15s, border-color .15s, color .15s, transform .1s;
+}
+.btn:active:not(:disabled), .stickers button:active, .thumbs button:active, .layouts button:active, .home-card:active { transform: scale(.97); }
+.btn.primary:hover:not(:disabled) { filter: brightness(1.08); border-color: var(--accent); }
+.modes button:hover { color: var(--fg); }
+.modes button[aria-selected="true"]:hover { color: var(--accent-ink); }
+.group > summary:hover { color: var(--accent); }
+.stage { background: radial-gradient(ellipse at 50% 40%, #1d1a25 0%, var(--bg) 72%); }
+.tools button { display: flex; align-items: center; gap: 8px; padding: 8px 8px; font-size: 13px; text-align: left; white-space: nowrap; }
+.tools svg { flex: none; width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+.btn-row { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+.btn-row.four { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.btn-row .btn { padding-left: 4px; padding-right: 4px; overflow: hidden; text-overflow: ellipsis; }
+#toast:not([hidden]) { animation: toast-in .18s ease-out; }
+@keyframes toast-in { from { opacity: 0; transform: translate(-50%, 8px); } }
+#dlg:not([hidden]) .export-card, #exportOverlay:not([hidden]) .export-card { animation: card-in .18s ease-out; }
+@keyframes card-in { from { opacity: 0; transform: translateY(14px); } }
+
+/* 手指操作：按鈕、滑桿、色票都放大到好點的大小 */
+@media (pointer: coarse) {
+  .btn { min-height: 40px; }
+  .btn.small { min-height: 34px; }
+  .chips .btn { min-height: 36px; padding: 6px 12px; }
+  .group > summary { padding: 14px 0 12px; }
+  .row input[type="range"] { height: 30px; }
+  .swatch { width: 32px; height: 32px; }
+  .swatch.big { width: 38px; height: 38px; }
+  input[type="color"] { width: 40px; height: 32px; }
+  .stickers button { padding: 8px 0; }
+  .auto-thumb button { width: 28px; height: 28px; }
+  .layouts button { padding: 5px; }
+}
+
+@media (max-width: 760px) {
+  /* 首頁：不用捲很久就能看到全部五個功能 */
+  .home-inner { padding: 20px 16px 32px; gap: 10px; }
+  .home-lead { font-size: 14px; }
+  .home-features { grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 8px; }
+  .home-feature { padding-bottom: 12px; }
+  .home-feature canvas { aspect-ratio: 4 / 3; margin-bottom: 4px; }
+  .home-feature strong { font-size: 17px; padding: 0 12px; }
+  .home-feature span { font-size: 12px; padding: 0 12px; }
+  .home-cards { grid-template-columns: 1fr; gap: 10px; margin-top: 0; }
+  .home-cards .home-card { display: grid; grid-template-columns: 108px minmax(0, 1fr); grid-template-rows: auto 1fr; gap: 2px 0; padding: 0; }
+  .home-cards .home-card canvas { grid-row: 1 / 3; width: 108px; height: 100%; min-height: 84px; aspect-ratio: auto; margin: 0; }
+  .home-cards .home-card strong { padding: 10px 14px 0; font-size: 17px; }
+  .home-cards .home-card span { padding: 0 14px 10px; font-size: 12px; }
+  .home-drop { margin-top: 4px; font-size: 12px; }
+
+  /* 修圖的工具列可以左右滑：右邊淡出，提示後面還有 */
+  #photo .tools { gap: 2px; padding: 4px 28px 4px 10px; -webkit-mask-image: linear-gradient(90deg, #000 calc(100% - 34px), transparent); mask-image: linear-gradient(90deg, #000 calc(100% - 34px), transparent); scrollbar-width: none; }
+  #photo .tools::-webkit-scrollbar { display: none; }
+  #photo .tools button { flex-direction: column; gap: 3px; padding: 5px 10px; font-size: 12px; }
+  #photo .tools svg { width: 20px; height: 20px; }
+  .panel-toggle, .panel-off .panel-toggle { height: 34px; }
+
+  /* 視窗從下方滑出，按鈕離拇指比較近；打字時移到上面，才不會被鍵盤蓋住 */
+  #dlg { place-items: end center; padding: 0; }
+  #dlg:has(textarea:focus, input[type="text"]:focus, input[type="search"]:focus, input[type="url"]:focus, input:not([type]):focus) { place-items: start center; }
+  #dlgCard { max-width: none !important; max-height: 90vh; max-height: 90dvh; border-radius: 18px 18px 0 0; border-width: 1px 0 0; padding: 20px 16px calc(20px + env(safe-area-inset-bottom, 0px)); }
+  #dlg:has(textarea:focus, input[type="text"]:focus, input[type="search"]:focus, input[type="url"]:focus, input:not([type]):focus) #dlgCard { border-radius: 0 0 18px 18px; }
+  #dlgCard .actions .btn { flex: 1; min-height: 44px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .btn, .modes button, .tools button, .auto-style, .thumbs button, .stickers button, .layouts button, .group > summary { transition: none; }
+  .btn:active:not(:disabled), .stickers button:active, .thumbs button:active, .layouts button:active, .home-card:active { transform: none; }
+  #toast:not([hidden]), #dlg:not([hidden]) .export-card, #exportOverlay:not([hidden]) .export-card { animation: none; }
 }

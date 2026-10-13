@@ -280,6 +280,7 @@ function tick(now) {
   if (nx && nx.trans && nx.trans !== 'none' && V.t >= L.start + clipDur(c)) { V.prevFrame = cloneCanvas(VC); V.prevFor = nx.id; }
   drawFrame(); updatePlayhead();
   encodeFrame(false);
+  if (V.gif && gifGrab()) return;
   requestAnimationFrame(tick);
 }
 function finishPlayback(total) {
@@ -288,6 +289,7 @@ function finishPlayback(total) {
   drawFrame(); updatePlayhead();
   if (V.exporting && V.rec && V.rec.state !== 'inactive') V.rec.stop();
   else if (V.exporting && V.enc) finishEncode();
+  else if (V.exporting && V.gif) finishGif();
 }
 function seek(t) {
   V.t = clamp(t, 0, totalDur());
@@ -424,7 +426,7 @@ function rebuildTL() {
 function updatePlayhead() {
   $('#playhead').style.transform = 'translateX(' + (V.t * V.pps - 1) + 'px)';
   $('#timeLabel').textContent = fmtTime(V.t) + ' / ' + fmtTime(totalDur());
-  if (V.exporting) $('#exportBar').style.width = (totalDur() ? V.t / totalDur() * 100 : 0) + '%';
+  if (V.exporting && !(V.gif && V.gif.done)) $('#exportBar').style.width = (totalDur() ? V.t / (V.gif ? Math.min(GIF_MAX_SEC, totalDur()) : totalDur()) * (V.gif ? 60 : 100) : 0) + '%';
   if (V.playing) {
     const sc = $('#tlScroll'), x = V.t * V.pps;
     if (x > sc.scrollLeft + sc.clientWidth - 60 || x < sc.scrollLeft) sc.scrollLeft = Math.max(0, x - 80);
@@ -705,16 +707,19 @@ function vPanel() {
       addClipText(L.clip);
     }
   }));
-  el.append(h('button', {
-    class: 'btn wide', text: V.music ? '換一首配樂' : MS.lib.length ? '加入配樂（套用上次用的）' : '加入配樂（搜尋、貼網址或選檔）',
+  el.append(h('h3', { text: '加入聲音' }));
+  const sound = h('div', { class: 'btn-row' });
+  el.append(sound);
+  sound.append(h('button', {
+    class: 'btn', text: V.music ? '換配樂' : '配樂', title: V.music ? '換一首配樂' : MS.lib.length ? '加入配樂：直接套用上次用的那一首' : '加入配樂：搜尋、貼網址或選檔',
     onclick: () => {
       // 之前下載、用過的音樂直接套用最近的一首；想換再按「換一首配樂」
       if (!V.music && MS.lib.length) { const it = MS.lib[0]; finishMusic(it.file, { title: it.title, credit: it.credit }); toast('已套用上次用的音樂「' + it.title + '」。想換別首請按「換一首配樂」。', 5000); }
       else openMusicDialog();
     }
   }));
-  el.append(h('button', { class: 'btn wide', text: '加入錄音', onclick: openRecordDialog }));
-  el.append(h('button', { class: 'btn wide', text: '加入虛擬人聲（打字變語音）', onclick: openTtsDialog }));
+  sound.append(h('button', { class: 'btn', text: '錄音', title: '用麥克風錄音，或選一個錄音檔', onclick: openRecordDialog }));
+  sound.append(h('button', { class: 'btn', text: '虛擬人聲', title: '打字變語音', onclick: openTtsDialog }));
   if (V.voices.length) {
     el = group(root, 'proj.voices', '錄音與人聲（' + V.voices.length + ' 段）', true);
     el.append(h('div', { class: 'chips' }, V.voices.map(v => h('button', {
@@ -856,7 +861,8 @@ function encodeFrame(force) {
 function endExportUi() {
   $('#exportOverlay').hidden = true;
   $('#exportTitle').textContent = '正在匯出影片';
-  V.exporting = false; V.rec = null; V.enc = null; V.res = 720; setVideoSize();
+  V.exporting = false; V.rec = null; V.enc = null; V.gif = null; V.res = 720; setVideoSize();
+  if (V.audio) V.audio.master.gain.value = 1;
 }
 function closeEncoder(E) {
   E.on = false;
@@ -910,6 +916,7 @@ async function exportVideo() {
   if (V.exporting) return;
   if (totalDur() <= 0) { toast('先加入影片或圖片'); return; }
   pause();
+  if (EXP.video.fmt === 'gif') { exportGif(); return; }
   const fps = +EXP.video.fps;
   V.res = +EXP.video.res;
   setVideoSize();
@@ -939,6 +946,131 @@ $('#cancelExport').addEventListener('click', () => {
     toast('已取消匯出');
   }
 });
+// ── GIF 動圖：播放一次，每秒抓幾格縮小的畫面，最後挑 256 色、壓成 GIF ──
+const GIF_FPS = 10, GIF_MAX_SEC = 15;
+function gifDims() {
+  const [a, b] = V_ASPECTS[V.aspect], L = +EXP.video.gif, s = L / Math.max(a, b);
+  return [Math.round(a * s / 2) * 2, Math.round(b * s / 2) * 2];
+}
+function exportGif() {
+  const [w, hh] = gifDims();
+  V.res = 720; setVideoSize();
+  ensureAudio();
+  if (V.audio) V.audio.master.gain.value = 0;   // GIF 沒有聲音，錄的時候也不用出聲
+  V.exporting = true; V.cancelled = false; V.rec = null; V.enc = null;
+  V.gif = { w, h: hh, cv: mk(w, hh), frames: [], hist: new Uint32Array(32768), last: -1, done: false };
+  $('#exportBar').style.width = '0%';
+  $('#exportTitle').textContent = '正在製作 GIF 動圖';
+  $('#exportOverlay').hidden = false;
+  seek(0);
+  const G = V.gif;
+  setTimeout(() => { if (V.exporting && V.gif === G) play(); }, 400);
+}
+// 播放迴圈每畫完一格就呼叫；回傳 true 表示已經抓夠了、播放該停了
+function gifGrab() {
+  const G = V.gif, n = Math.floor(V.t * GIF_FPS);
+  if (!G || G.done || n <= G.last) return false;
+  G.last = n;
+  const x = G.cv.getContext('2d', { willReadFrequently: true });
+  x.imageSmoothingQuality = 'high';
+  x.drawImage(VC, 0, 0, G.w, G.h);
+  const d = x.getImageData(0, 0, G.w, G.h).data, px = new Uint16Array(G.w * G.h);
+  for (let i = 0, j = 0; j < px.length; i += 4, j++) {
+    const c = (d[i] >> 3) << 10 | (d[i + 1] >> 3) << 5 | d[i + 2] >> 3;
+    px[j] = c; G.hist[c]++;
+  }
+  G.frames.push(px);
+  if (V.t >= GIF_MAX_SEC - 1 / GIF_FPS) { pause(); finishGif(); return true; }
+  return false;
+}
+// 中位切割：把出現過的顏色切成 256 群，每群取平均當代表色
+function gifPalette(hist) {
+  const cols = [];
+  for (let c = 0; c < 32768; c++) if (hist[c]) cols.push(c);
+  const ch = (c, k) => (c >> (10 - 5 * k)) & 31;
+  const mkBox = list => {
+    const lo = [31, 31, 31], hi = [0, 0, 0];
+    let n = 0;
+    for (const c of list) { n += hist[c]; for (let k = 0; k < 3; k++) { const v = ch(c, k); if (v < lo[k]) lo[k] = v; if (v > hi[k]) hi[k] = v; } }
+    const rng = hi.map((v, k) => v - lo[k]), axis = rng.indexOf(Math.max(...rng));
+    return { list, n, axis, score: list.length > 1 ? Math.max(...rng) * Math.sqrt(n) : -1 };
+  };
+  let boxes = cols.length ? [mkBox(cols)] : [];
+  while (boxes.length < 256) {
+    let bi = -1;
+    boxes.forEach((b, i) => { if (b.score > 0 && (bi < 0 || b.score > boxes[bi].score)) bi = i; });
+    if (bi < 0) break;
+    const b = boxes[bi], ax = b.axis;
+    b.list.sort((p, q) => ch(p, ax) - ch(q, ax));
+    let acc = 0, cut = 1;
+    for (let i = 0; i < b.list.length - 1; i++) { acc += hist[b.list[i]]; cut = i + 1; if (acc >= b.n / 2) break; }
+    boxes.splice(bi, 1, mkBox(b.list.slice(0, cut)), mkBox(b.list.slice(cut)));
+  }
+  const pal = new Uint8Array(768), map = new Uint8Array(32768);
+  boxes.forEach((b, i) => {
+    const s = [0, 0, 0];
+    for (const c of b.list) { for (let k = 0; k < 3; k++) s[k] += ch(c, k) * hist[c]; map[c] = i; }
+    for (let k = 0; k < 3; k++) { const v = Math.round(s[k] / b.n); pal[i * 3 + k] = v << 3 | v >> 2; }
+  });
+  return { pal, map };
+}
+// GIF 用的 LZW 壓縮，輸出切成每塊最多 255 位元組
+function gifLzw(idx, out) {
+  const CLEAR = 256, EOI = 257;
+  let size = 9, next = 258, cur = 0, bits = 0, table = new Map();
+  let block = [];
+  const emit = code => {
+    cur |= code << bits; bits += size;
+    while (bits >= 8) { block.push(cur & 255); cur >>>= 8; bits -= 8; if (block.length === 255) { out.push(255, ...block); block = []; } }
+  };
+  out.push(8);
+  emit(CLEAR);
+  let prefix = idx[0];
+  for (let i = 1; i < idx.length; i++) {
+    const k = idx[i], key = prefix << 8 | k, hit = table.get(key);
+    if (hit !== undefined) { prefix = hit; continue; }
+    emit(prefix);
+    if (next === 4096) { emit(CLEAR); next = 258; size = 9; table = new Map(); }
+    else { if (next >= (1 << size)) size++; table.set(key, next++); }
+    prefix = k;
+  }
+  emit(prefix); emit(EOI);
+  if (bits > 0) block.push(cur & 255);
+  if (block.length) out.push(block.length, ...block);
+  out.push(0);
+}
+async function finishGif() {
+  const G = V.gif;
+  if (!G || G.done) return;
+  G.done = true;
+  $('#exportTitle').textContent = '正在壓縮 GIF…';
+  await new Promise(r => setTimeout(r, 30));
+  try {
+    if (!G.frames.length) throw new Error('沒有抓到畫面');
+    const { pal, map } = gifPalette(G.hist), w = G.w, hh = G.h, delay = Math.round(100 / GIF_FPS);
+    const parts = [];
+    const head = [71, 73, 70, 56, 57, 97, w & 255, w >> 8, hh & 255, hh >> 8, 0xF7, 0, 0];
+    parts.push(new Uint8Array(head), pal, new Uint8Array([0x21, 0xFF, 11, 78, 69, 84, 83, 67, 65, 80, 69, 50, 46, 48, 3, 1, 0, 0, 0]));
+    const idx = new Uint8Array(w * hh);
+    for (let f = 0; f < G.frames.length; f++) {
+      if (V.cancelled || V.gif !== G) return;
+      const px = G.frames[f], out = [0x21, 0xF9, 4, 0, delay & 255, delay >> 8, 0, 0, 0x2C, 0, 0, 0, 0, w & 255, w >> 8, hh & 255, hh >> 8, 0];
+      for (let i = 0; i < px.length; i++) idx[i] = map[px[i]];
+      gifLzw(idx, out);
+      parts.push(new Uint8Array(out));
+      G.frames[f] = null;
+      $('#exportBar').style.width = (60 + 40 * (f + 1) / G.frames.length) + '%';
+      if (f % 3 === 2) await new Promise(r => setTimeout(r, 0));
+    }
+    parts.push(new Uint8Array([0x3B]));
+    const blob = new Blob(parts, { type: 'image/gif' });
+    endExportUi();
+    saveFile('剪輯作品.gif', blob);
+  } catch (e) {
+    endExportUi();
+    toast('GIF 製作失敗：' + ((e && e.message) || '記憶體不足') + '。可以選小一點的大小再試一次。', 6000);
+  }
+}
 const V_BPP = { std: 0.07, high: 0.12, max: 0.2 };
 function videoBitrate() {
   const [w, hh] = videoDims(+EXP.video.res);
