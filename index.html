@@ -82,7 +82,7 @@
           <button class="btn primary" id="avatarEmptyBtn">選人像照片</button>
         </div>
       </div>
-      <div class="stage-foot" id="avatarFoot"><button id="avPlay" class="btn primary small">播放</button><span>嘴型會跟著聲音大小開合</span></div>
+      <div class="stage-foot" id="avatarFoot"><button id="avPlay" class="btn primary small">播放</button><span>嘴型跟著聲音開合，頭和眉毛跟著語氣動</span></div>
     </div>
     <aside class="panel" id="avatarPanel"></aside>
   </section>
@@ -207,14 +207,14 @@
   }
   // 每次改版把 VERSION 加一。只有在 GitHub Pages 才加版本參數，避免瀏覽器繼續用舊的程式檔
   (function () {
-    var VERSION = '37', bust = /github\.io$/.test(location.hostname) ? '?v=' + VERSION : '';
+    var VERSION = '38', bust = /github\.io$/.test(location.hostname) ? '?v=' + VERSION : '';
     window.APP_VERSION = VERSION;
     if (bust) {
       var css = document.createElement('link');
       css.rel = 'stylesheet'; css.href = 'app.css' + bust;
       document.head.appendChild(css);
     }
-    ['core', 'ai', 'photo', 'collage', 'video', 'stt', 'music', 'auto', 'avatar', 'main'].forEach(function (name) {
+    ['core', 'ai', 'photo', 'collage', 'video', 'stt', 'music', 'auto', 'rig', 'avatar', 'main'].forEach(function (name) {
       var s = document.createElement('script');
       s.src = name + '.js' + bust; s.async = false;
       document.body.appendChild(s);

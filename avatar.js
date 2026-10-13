@@ -1,7 +1,7 @@
 // 虛擬人：一張人像照片 + 一段話 → 會開口說話的影片
 // 做法：找出照片裡臉部的定位點，依語音的音量讓下巴和嘴巴開合、眼睛眨動、頭輕微擺動。
 // 文字用瀏覽器裡的語音模型唸出來（不上傳）。這是「會動的照片」，不是重新生成一個人，
-// 嘴型只會跟著音量開合，不會對出每個字的口型。
+// 嘴型跟著音量和聲音的高低開合，不會精確對出每個字的口型。
 const AVC = $('#avc');
 const avx = AVC.getContext('2d');
 // 各語言可用的語音模型（f 女聲、m 男聲）。只有一種性別的語言，另一種用調整音高的方式模擬。
@@ -87,6 +87,7 @@ const AV = {
   img: null, pix: null, face: null, frame: null,
   text: '', gender: 'f', lang: 'zh', audio: null, lines: [], rec: null,
   el: null, playing: false, t: 0, amt: 70, blink: true, sway: true, caps: true, aspect: 'orig',
+  rig: null, style: 'natural', head: 100, smile: 0, brows: true,
   busy: false, cancel: false, tts: null, detector: null
 };
 
@@ -94,6 +95,7 @@ const AV = {
 async function detectFace(canvas) {
   if (!AV.detector) {
     const vision = await import(VISION_URL + '/+esm');
+    AV.conns = vision.FaceLandmarker.FACE_LANDMARKS_TESSELATION;   // 臉部網格的連接方式，建立網格時要用
     const files = await vision.FilesetResolver.forVisionTasks(VISION_URL + '/wasm');
     AV.detector = await vision.FaceLandmarker.createFromOptions(files, { baseOptions: { modelAssetPath: FACE_MODEL, delegate: 'CPU' }, runningMode: 'IMAGE', numFaces: 1 });
   }
@@ -186,12 +188,52 @@ function drawFaceFrame(open, blink) {
   }
 }
 // 每隔 3 到 5 秒眨一次眼，一次約 0.18 秒
+// 眨眼：每隔 2.5 到 5 秒一次，偶爾連眨兩下；閉得快、張得慢
 function blinkAt(t) {
   if (!AV.blink) return 0;
-  let start = 1.1, n = 0;
-  while (start < t - 0.2) { start += 3 + ((n * 7919) % 100) / 50; n++; }
-  const d = t - start;
-  return d < 0 || d > 0.18 ? 0 : 1 - Math.abs(d / 0.09 - 1);
+  const shape = d => (d < 0 || d > 0.22 ? 0 : d < 0.07 ? d / 0.07 : 1 - (d - 0.07) / 0.15);
+  let start = 0.9, n = 0, v = 0;
+  while (start < t + 0.01) {
+    v = Math.max(v, shape(t - start));
+    if (n % 4 === 2) v = Math.max(v, shape(t - start - 0.3));   // 連眨兩下
+    start += 2.5 + ((n * 7919) % 100) / 40;
+    n++;
+  }
+  return v;
+}
+const AV_STYLES = [
+  ['natural', '自然', { head: 1, nod: 1, brow: 1 }],
+  ['calm', '沉穩', { head: 0.45, nod: 0.5, brow: 0.5 }],
+  ['lively', '活潑', { head: 1.7, nod: 1.5, brow: 1.4 }],
+  ['nod', '頻頻點頭', { head: 0.8, nod: 2.4, brow: 0.9 }],
+  ['still', '只動臉', { head: 0, nod: 0, brow: 1 }]
+];
+function sampleAt(arr, t) {
+  const p = t * 60, i = Math.floor(p);
+  if (!arr || i < 0 || i >= arr.length - 1) return 0;
+  return arr[i] + (arr[i + 1] - arr[i]) * (p - i);
+}
+// 時間 t 的整體姿勢：嘴巴跟著聲音，頭和眉毛是「緩慢的隨機擺動」加上「語氣加重時點一下頭、挑一下眉」
+function poseAt(t) {
+  const a = AV.audio, r = AV.rig, st = AV_STYLES.find(x => x[0] === AV.style)[2], k = AV.head / 100 * st.head;
+  const open = sampleAt(a && a.env, t), wide = sampleAt(a && a.wide, t);
+  let nod = 0, brow = 0;
+  if (a) for (const e of a.emph) {
+    const d = t - e + 0.1;
+    if (d > 0 && d < 0.7) nod += Math.pow(Math.sin(Math.PI * d / 0.7), 2);
+    if (d > 0 && d < 0.5) brow += Math.sin(Math.PI * d / 0.5);
+  }
+  // 幾個不同快慢的波疊起來，看起來不會像規律的鐘擺
+  const yaw = (Math.sin(t * 0.53 + 1.3) * 0.55 + Math.sin(t * 1.27 + 0.4) * 0.3 + Math.sin(t * 2.9) * 0.08) * 4.5 * k;
+  const pitch = (Math.sin(t * 0.61 + 2.1) * 0.5 + Math.sin(t * 1.53) * 0.3) * 2.4 * k + nod * 3.4 * st.nod * AV.head / 100 + open * 0.9 * k;
+  const roll = (Math.sin(t * 0.41 + 0.7) * 0.6 + Math.sin(t * 1.1 + 2) * 0.25) * 2.2 * k;
+  return {
+    jaw: open * (r.chinY - r.lipMid) * 0.3 * AV.amt / 100 * (1 - 0.35 * wide),
+    wide: wide * 0.9 - open * 0.3, smile: AV.smile / 100 * (1 - open * 0.25),
+    brow: AV.brows ? Math.min(1, brow * st.brow) * 0.9 + open * 0.12 : 0,
+    blink: blinkAt(t), yaw, pitch, roll,
+    tx: Math.sin(t * 0.37 + 0.5) * r.size * 0.012 * k, ty: Math.sin(t * 0.83) * r.size * 0.006 * k
+  };
 }
 function openAt(t) {
   const a = AV.audio;
@@ -212,22 +254,24 @@ function avatarSize() {
 function avatarDraw(canvas, t) {
   const [W, H] = avatarSize(), ctx = canvas.getContext('2d');
   if (canvas.width !== W || canvas.height !== H) { canvas.width = W; canvas.height = H; }
-  const open = openAt(t);
-  drawFaceFrame(open, blinkAt(t));
-  const iw = AV.img.width, ih = AV.img.height, f = AV.face;
-  const s = Math.max(W / iw, H / ih) * (AV.sway ? 1.035 : 1);
+  const open = openAt(t), rig = AV.rig;
+  let frame = AV.frame;
+  if (rig) frame = rigRender(rig, poseAt(t));
+  else drawFaceFrame(open, blinkAt(t));
+  const iw = AV.img.width, ih = AV.img.height, f = AV.face, swayAll = !rig && AV.sway;
+  const s = Math.max(W / iw, H / ih) * (swayAll ? 1.035 : 1);
   // 裁切時盡量把臉放在畫面中間偏上
   const ox = clamp(W / 2 - f.cx * s, W - iw * s, 0), oy = clamp(H * 0.42 - f.cy * s, H - ih * s, 0);
   ctx.fillStyle = '#000000'; ctx.fillRect(0, 0, W, H);
   ctx.save();
-  if (AV.sway) {
+  if (swayAll) {
     const px = ox + f.cx * s, py = oy + f.cy * s;
     ctx.translate(px + Math.sin(t * 0.7) * W * 0.004, py + Math.sin(t * 1.3) * H * 0.003 + open * H * 0.002);
     ctx.rotate((Math.sin(t * 0.9) * 0.6 + Math.sin(t * 2.3) * 0.25) * Math.PI / 180);
     ctx.translate(-px, -py);
   }
   ctx.imageSmoothingQuality = 'high';
-  ctx.drawImage(AV.frame, ox, oy, iw * s, ih * s);
+  ctx.drawImage(frame, ox, oy, iw * s, ih * s);
   ctx.restore();
   if (AV.caps) {
     const line = AV.lines.find(l => t >= l.start && t < l.end);
@@ -261,6 +305,8 @@ async function setAvatarPhoto(file) {
     AV.pix = cv.getContext('2d').getImageData(0, 0, cv.width, cv.height);
     AV.frame = mk(cv.width, cv.height);
     AV.face = buildFace(lm, cv.width, cv.height);
+    // 臉部網格建不起來（瀏覽器不支援 WebGL、套件載不到）時 rig 是 null，會退回只動嘴巴和眼睛的簡單做法
+    try { AV.rig = await buildRig(cv, lm, AV.conns); } catch (e) { AV.rig = null; }
     AV.t = 0;
     syncAvatarEmpty(); avatarPanel(); avatarRefresh();
   } catch (e) {
@@ -282,10 +328,25 @@ async function setAvatarAudio(blob, text) {
     v += (target - v) * (target > v ? 0.55 : 0.28);   // 張開快、合起來慢一點，比較像真的在說話
     env[i] = v;
   }
+  // 嘴型寬窄：ㄙ、ㄒ、ㄧ這類聲音高頻多，嘴角往兩邊拉；ㄨ、ㄛ這類低沉的聲音嘴巴比較圓
+  const wide = new Float32Array(n + 2);
+  let wv = 0;
+  for (let i = 0; i < n; i++) {
+    let z = 0;
+    for (let j = i * hop + 1, e = j + hop - 1; j < e; j++) if ((pcm[j] >= 0) !== (pcm[j - 1] >= 0)) z++;
+    const target = raw[i] / ref < 0.12 ? 0 : clamp((z / hop - 0.05) / 0.13, 0, 1);
+    wv += (target - wv) * 0.4;
+    wide[i] = wv;
+  }
+  // 語氣加重的地方：音量從小突然變大，而且跟上一次隔一小段時間
+  const emph = [];
+  for (let i = 8; i < n; i++) {
+    if (env[i] > 0.7 && env[i - 7] < 0.42 && (!emph.length || i / 60 - emph[emph.length - 1] > 0.75)) emph.push(i / 60);
+  }
   avatarStop();
   if (AV.audio) URL.revokeObjectURL(AV.audio.url);
   const dur = pcm.length / 48000, url = URL.createObjectURL(blob);
-  AV.audio = { pcm, env, dur, url };
+  AV.audio = { pcm, env, wide, emph, dur, url };
   AV.lines = text ? splitCaption({ text, start: 0.05, end: Math.max(0.2, dur - 0.05) }) : [];
   AV.el = new Audio(url);
   AV.el.addEventListener('ended', () => { avatarStop(); AV.t = 0; avatarRefresh(); });
@@ -500,11 +561,20 @@ function avatarPanel() {
   el.append(h('p', { text: '用錄音時，人像會跟著你的聲音開口；上面有輸入文字的話會當成字幕。' }));
 
   el = group(root, 'av.motion', '2　動作', false);
-  slider(el, { label: '嘴巴張開的幅度', min: 20, max: 130, value: AV.amt, def: 70, fmt: v => v + '%', onInput: v => { AV.amt = v; if (!AV.playing) { avatarDraw(AVC, AV.t); } } });
+  const redraw = () => { if (!AV.playing) avatarRefresh(); };
+  if (AV.rig) {
+    el.append(h('h3', { text: '說話的樣子' }));
+    chips(el, AV_STYLES.map(x => [x[0], x[1]]), AV.style, v => { AV.style = v; redraw(); });
+    slider(el, { label: '頭部動作的幅度', min: 0, max: 200, step: 5, value: AV.head, def: 100, fmt: v => v + '%', onInput: v => { AV.head = v; redraw(); } });
+  }
+  slider(el, { label: '嘴巴張開的幅度', min: 20, max: 130, value: AV.amt, def: 70, fmt: v => v + '%', onInput: v => { AV.amt = v; redraw(); } });
+  if (AV.rig) slider(el, { label: '微笑', min: 0, max: 100, value: AV.smile, def: 0, fmt: v => v + '%', onInput: v => { AV.smile = v; redraw(); } });
   el.append(h('div', { class: 'chips' },
     h('button', { class: 'btn', 'aria-pressed': String(AV.blink), text: '眨眼', onclick: () => { AV.blink = !AV.blink; avatarPanel(); } }),
-    h('button', { class: 'btn', 'aria-pressed': String(AV.sway), text: '頭部輕微擺動', onclick: () => { AV.sway = !AV.sway; avatarPanel(); avatarRefresh(); } }),
+    AV.rig ? h('button', { class: 'btn', 'aria-pressed': String(AV.brows), text: '挑眉', onclick: () => { AV.brows = !AV.brows; avatarPanel(); } })
+      : h('button', { class: 'btn', 'aria-pressed': String(AV.sway), text: '頭部輕微擺動', onclick: () => { AV.sway = !AV.sway; avatarPanel(); avatarRefresh(); } }),
     h('button', { class: 'btn', 'aria-pressed': String(AV.caps), text: '顯示字幕', onclick: () => { AV.caps = !AV.caps; avatarPanel(); avatarRefresh(); } })));
+  if (AV.rig) el.append(h('p', { text: '頭會緩慢地轉動、歪頭，說到語氣加重的地方會點一下頭、挑一下眉。肩膀和背景不會跟著動。' }));
 
   el = group(root, 'av.aspect', '3　畫面比例', false);
   chips(el, AV_ASPECTS, AV.aspect, v => { AV.aspect = v; avatarRefresh(); });
