@@ -169,6 +169,7 @@
           <div class="ruler" id="tlRuler"></div>
           <div class="track t-text" id="tlTexts"></div>
           <div class="track t-clips" id="tlClips"></div>
+          <div class="track t-voice" id="tlVoice" hidden></div>
           <div class="track t-music" id="tlMusic"></div>
           <div class="tl-drop" id="tlDrop" hidden></div>
           <div class="playhead" id="playhead"></div>
@@ -207,14 +208,14 @@
   }
   // 每次改版把 VERSION 加一。只有在 GitHub Pages 才加版本參數，避免瀏覽器繼續用舊的程式檔
   (function () {
-    var VERSION = '38', bust = /github\.io$/.test(location.hostname) ? '?v=' + VERSION : '';
+    var VERSION = '39', bust = /github\.io$/.test(location.hostname) ? '?v=' + VERSION : '';
     window.APP_VERSION = VERSION;
     if (bust) {
       var css = document.createElement('link');
       css.rel = 'stylesheet'; css.href = 'app.css' + bust;
       document.head.appendChild(css);
     }
-    ['core', 'ai', 'photo', 'collage', 'video', 'stt', 'music', 'auto', 'rig', 'avatar', 'main'].forEach(function (name) {
+    ['core', 'ai', 'photo', 'collage', 'video', 'stt', 'music', 'auto', 'rig', 'avatar', 'voice', 'main'].forEach(function (name) {
       var s = document.createElement('script');
       s.src = name + '.js' + bust; s.async = false;
       document.body.appendChild(s);

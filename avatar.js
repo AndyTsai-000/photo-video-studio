@@ -362,30 +362,36 @@ async function toSimp(text) {
   }
   return toSimpFn(text);
 }
+// 把文字唸成語音，回傳 WAV。虛擬人和手動剪輯的「虛擬人聲」共用
+async function synthSpeech(text, lang, gender) {
+  const voice = voiceFor(lang, gender);
+  if (!voice) throw new Error('novoice');
+  aiStatus('正在準備語音…', 1);
+  if (!AV.tts) AV.tts = await import(PIPER_URL);
+  const lib = AV.tts;
+  // 中文語音模型認簡體字，先轉換（畫面上的字幕仍用原本輸入的文字）
+  const say = lang === 'zh' ? await toSimp(text) : text;
+  lib.TtsSession._instance = null;   // 換聲音時要重新載入模型
+  const session = await lib.TtsSession.create({
+    voiceId: voice.id, wasmPaths: PIPER_PATHS,
+    progress: p => { if (p && p.total) aiStatus('第一次使用這個聲音，正在下載語音模型…（之後不用再下載）', p.loaded / p.total); }
+  });
+  aiStatus('正在把文字變成語音…', 1);
+  let wav = await session.predict(say);
+  if (voice.shift !== 1) {
+    aiStatus('正在調整成' + (gender === 'm' ? '男聲' : '女聲') + '…', 1);
+    wav = pcmToWav(pitchShift(await decodeMono48k(wav), voice.shift), 48000);
+  }
+  return wav;
+}
 async function avatarSpeak() {
-  const text = AV.text.trim(), voice = voiceFor(AV.lang, AV.gender);
+  const text = AV.text.trim();
   if (AV.busy) return;
-  if (!voice) { toast('這個語言沒有語音模型，請改用麥克風錄音'); return; }
+  if (!voiceFor(AV.lang, AV.gender)) { toast('這個語言沒有語音模型，請改用麥克風錄音'); return; }
   if (!text) { toast('先輸入要讓人像說的話'); return; }
   AV.busy = true; avatarPanel();
-  aiStatus('正在準備語音…', 1);
   try {
-    if (!AV.tts) AV.tts = await import(PIPER_URL);
-    const lib = AV.tts;
-    // 中文語音模型認簡體字，先轉換；顯示的字幕仍用原本輸入的文字
-    const say = AV.lang === 'zh' ? await toSimp(text) : text;
-    lib.TtsSession._instance = null;   // 換聲音時要重新載入模型
-    const session = await lib.TtsSession.create({
-      voiceId: voice.id, wasmPaths: PIPER_PATHS,
-      progress: p => { if (p && p.total) aiStatus('第一次使用這個聲音，正在下載語音模型…（之後不用再下載）', p.loaded / p.total); }
-    });
-    aiStatus('正在把文字變成語音…', 1);
-    let wav = await session.predict(say);
-    if (voice.shift !== 1) {
-      aiStatus('正在調整成' + (AV.gender === 'm' ? '男聲' : '女聲') + '…', 1);
-      wav = pcmToWav(pitchShift(await decodeMono48k(wav), voice.shift), 48000);
-    }
-    await setAvatarAudio(wav, text);
+    await setAvatarAudio(await synthSpeech(text, AV.lang, AV.gender), text);
     aiStatus(null);
     AV.busy = false;
     avatarPanel(); avatarRefresh();

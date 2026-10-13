@@ -3,7 +3,7 @@
 const MUSIC_MOODS = [['upbeat', '輕快'], ['calm piano', '鋼琴'], ['acoustic guitar', '吉他'], ['lofi', 'Lo-fi'], ['cinematic', '電影感'], ['electronic', '電子'], ['jazz', '爵士'], ['ukulele happy', '可愛'], ['ambient', '氛圍'], ['rock', '搖滾']];
 const MUSIC_LENGTHS = [['', '不限長度'], ['short,medium,long', '30 秒以上'], ['medium,long', '2 分鐘以上']];
 const BLOCKED_HOSTS = /(^|\.)(youtube\.com|youtu\.be|spotify\.com|instagram\.com|tiktok\.com|music\.apple\.com|soundcloud\.com|kkbox\.com|facebook\.com|fb\.watch)$/;
-const MS = { q: '', len: 'short,medium,long', results: null, loading: false, err: '', preview: null, playing: '', urlMsg: '', busy: false };
+const MS = { lib: [], q: '', len: 'short,medium,long', results: null, loading: false, err: '', preview: null, playing: '', urlMsg: '', busy: false };
 
 function stopMusicPreview() {
   if (MS.preview) { MS.preview.pause(); MS.preview = null; }
@@ -47,9 +47,40 @@ async function searchMusic(q) {
   renderMusicDialog();
 }
 
+// ── 用過的音樂 ──
+// 下載、選過的音樂留在這台裝置的瀏覽器裡（最多 12 首，最近用的排最前面），下次不用再找、再下載
+function musicDb() {
+  return new Promise((res, rej) => {
+    const rq = indexedDB.open('studio-music', 1);
+    rq.onupgradeneeded = () => rq.result.createObjectStore('tracks', { keyPath: 'title' });
+    rq.onsuccess = () => res(rq.result); rq.onerror = () => rej(rq.error);
+  });
+}
+async function loadMusicLib() {
+  try {
+    const db = await musicDb(), all = await new Promise((res, rej) => { const rq = db.transaction('tracks').objectStore('tracks').getAll(); rq.onsuccess = () => res(rq.result); rq.onerror = () => rej(rq.error); });
+    MS.lib = all.sort((a, b) => b.used - a.used).map(t => ({ title: t.title, credit: t.credit || '', file: new File([t.blob], t.name || t.title, { type: t.type || 'audio/mpeg' }) }));
+    if (typeof vPanel === 'function' && MODE === 'video') vPanel();
+  } catch (e) { /* 這個瀏覽器不能存，就只記在這次開啟的期間 */ }
+}
+async function rememberMusic(file, meta) {
+  const title = (meta && meta.title) || file.name, credit = (meta && meta.credit) || '';
+  MS.lib = [{ title, credit, file }].concat(MS.lib.filter(t => t.title !== title)).slice(0, 12);
+  try {
+    const db = await musicDb(), store = db.transaction('tracks', 'readwrite').objectStore('tracks');
+    store.put({ title, credit, name: file.name, type: file.type, blob: file, used: Date.now() });
+    const keep = new Set(MS.lib.map(t => t.title));
+    store.getAllKeys().onsuccess = e => { for (const k of e.target.result) if (!keep.has(k)) store.delete(k); };
+  } catch (e) { /* 存不了就算了 */ }
+}
+async function forgetMusic(title) {
+  MS.lib = MS.lib.filter(t => t.title !== title);
+  try { (await musicDb()).transaction('tracks', 'readwrite').objectStore('tracks').delete(title); } catch (e) { /* 略過 */ }
+}
 // 預設把選好的音樂放進剪輯；智能剪輯開啟這個視窗時會傳入自己的接收函式
 let musicCb = null;
 function finishMusic(file, meta) {
+  rememberMusic(file, meta);
   if (musicCb) {
     const cb = musicCb;
     musicCb = null;
@@ -117,6 +148,13 @@ function renderMusicDialog() {
   card.replaceChildren();
   card.append(h('h2', { text: '加入配樂' }));
 
+  if (MS.lib.length) {
+    card.append(h('h3', { text: '用過的音樂（點「使用」直接套用，不用再下載）' }));
+    card.append(h('div', { class: 'music-list lib' }, MS.lib.map(t => h('div', { class: 'music-row' },
+      h('button', { class: 'btn small', title: '從清單移除', 'aria-label': '移除 ' + t.title, text: '×', onclick: async () => { await forgetMusic(t.title); renderMusicDialog(); } }),
+      h('div', { class: 'music-meta' }, h('strong', { text: t.title }), h('span', { text: t.credit ? '需標示作者' : '已存在這台裝置' })),
+      h('button', { class: 'btn small primary', text: '使用', onclick: () => { finishMusic(t.file, { title: t.title, credit: t.credit }); toast('已套用「' + t.title + '」'); } })))));
+  }
   card.append(h('h3', { text: '搜尋免費音樂' }));
   const input = h('input', { type: 'text', id: 'musicQuery', placeholder: '英文關鍵字，例如 piano、travel、happy', 'aria-label': '搜尋音樂' });
   input.value = MS.q;

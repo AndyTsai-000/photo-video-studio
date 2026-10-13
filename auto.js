@@ -90,7 +90,8 @@ async function runAutoEdit() {
   try {
     pause();
     if (V.music) V.music.el.pause();
-    V.clips = []; V.texts = []; V.music = null; V.sel = V.selText = null; V.t = 0;
+    for (const v of V.voices) v.el.pause();
+    V.clips = []; V.texts = []; V.music = null; V.voices = []; V.sel = V.selText = V.selVoice = null; V.t = 0;
     V.aspect = AU.aspect;
     STT.auto = false;   // 字幕等片段挑好之後再處理，這裡先不要自動跑
     let items = AU.items.slice();

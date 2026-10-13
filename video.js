@@ -2,7 +2,7 @@
 const VC = $('#vc');
 const vctx = VC.getContext('2d');
 const V = {
-  clips: [], texts: [], music: null,
+  clips: [], texts: [], music: null, voices: [], selVoice: null,
   t: 0, playing: false, active: null, lastTs: 0,
   sel: null, selText: null, aspect: '16:9', res: 720, pps: 50,
   exporting: false, rec: null, cancelled: false, audio: null
@@ -221,15 +221,25 @@ function activate(c, local) {
   setGain(v, c.vol);
   v.play().catch(() => {});
 }
-function syncMusic() {
-  const m = V.music;
-  if (!m) return;
-  setGain(m.el, m.vol);
-  if (V.playing && V.t + m.offset < m.dur) {
-    const want = V.t + m.offset;
-    if (Math.abs(m.el.currentTime - want) > 0.15) m.el.currentTime = want;
-    m.el.play().catch(() => {});
-  } else m.el.pause();
+// 影片以外的聲音：一首配樂，加上任意多段錄音、虛擬人聲。每一段有自己在時間軸上的開始時間
+function audioItems() {
+  const list = [];
+  if (V.music) list.push({ el: V.music.el, start: 0, offset: V.music.offset, dur: V.music.dur, vol: V.music.vol });
+  for (const v of V.voices) list.push({ el: v.el, start: v.start, offset: 0, dur: v.dur, vol: v.vol });
+  return list;
+}
+// 讓每一段聲音跟上播放頭：該響的開始播、不該響的停下來。hard 表示剛跳過時間，位置要重新對準
+function syncAudio(hard) {
+  for (const a of audioItems()) {
+    const local = V.t - a.start + a.offset, on = V.playing && V.t >= a.start && local < a.dur - 0.03;
+    if (on) {
+      if (a.el.paused || hard) {
+        setGain(a.el, a.vol);
+        if (Math.abs(a.el.currentTime - local) > 0.15) a.el.currentTime = local;
+        a.el.play().catch(() => {});
+      }
+    } else if (!a.el.paused) a.el.pause();
+  }
 }
 function play() {
   const total = totalDur();
@@ -238,14 +248,14 @@ function play() {
   ensureAudio();
   V.playing = true; V.active = null; V.lastTs = performance.now();
   $('#playBtn').textContent = '暫停';
-  syncMusic();
+  syncAudio(true);
   requestAnimationFrame(tick);
 }
 function pause() {
   V.playing = false;
   if (V.active && V.active.kind === 'video') V.active.el.pause();
   V.active = null;
-  if (V.music) V.music.el.pause();
+  for (const a of audioItems()) a.el.pause();
   $('#playBtn').textContent = '播放';
 }
 function tick(now) {
@@ -262,11 +272,8 @@ function tick(now) {
       else V.t = Math.max(V.t, L.start + Math.max(0, (v.currentTime - c.in) / c.speed));
     }
   } else V.t += dt;
-  if (V.music) {
-    const m = V.music;
-    if (V.t + m.offset >= m.dur) m.el.pause();
-    else if (m.fadeOut) setGain(m.el, m.vol * clamp((total - V.t) / 2, 0, 1));
-  }
+  syncAudio(false);
+  if (V.music && V.music.fadeOut) setGain(V.music.el, V.music.vol * clamp((total - V.t) / 2, 0, 1));
   if (V.t >= total) { finishPlayback(total); return; }
   // 這一格要跨到下一段、而且下一段有設轉場：畫布上還是這一段的最後一格，先留下來做過場
   const nx = V.clips[L.idx + 1];
@@ -285,7 +292,7 @@ function finishPlayback(total) {
 function seek(t) {
   V.t = clamp(t, 0, totalDur());
   V.prevFor = null;
-  if (V.playing) { V.active = null; syncMusic(); }
+  if (V.playing) { V.active = null; syncAudio(true); }
   else {
     const L = locate(Math.min(V.t, Math.max(0, totalDur() - 0.001)));
     if (L.clip && L.clip.kind === 'video') {
@@ -400,6 +407,15 @@ function rebuildTL() {
     }
     cs += clipDur(c);
   }
+  const tv = $('#tlVoice');
+  tv.replaceChildren();
+  for (const v of V.voices) {
+    tv.append(h('div', {
+      class: 'vbar', 'data-voice': v.id, 'aria-selected': String(V.selVoice === v.id), title: v.name,
+      style: 'left:' + v.start * pps + 'px;width:' + Math.max(14, v.dur * pps - 1) + 'px', text: (v.kind === 'tts' ? '人聲　' : '錄音　') + v.name
+    }));
+  }
+  tv.hidden = !V.voices.length;
   const tm = $('#tlMusic');
   tm.replaceChildren();
   if (V.music) tm.append(h('div', { class: 'mbar', style: 'width:' + Math.max(40, Math.min(V.music.dur ? V.music.dur - V.music.offset : total, total) * pps) + 'px', text: '配樂　' + V.music.name }));
@@ -496,10 +512,10 @@ function addFreezeFrame() {
     vCommit();
   };
   inner.addEventListener('pointerdown', e => {
-    const clipEl = e.target.closest('[data-clip]'), textEl = e.target.closest('[data-text]');
-    const sel = clipEl ? +clipEl.dataset.clip : null, selText = textEl ? +textEl.dataset.text : null;
-    if ((clipEl || textEl) && (V.sel !== sel || V.selText !== selText)) {
-      V.sel = sel; V.selText = selText;
+    const clipEl = e.target.closest('[data-clip]'), textEl = e.target.closest('[data-text]'), voiceEl = e.target.closest('[data-voice]');
+    const sel = clipEl ? +clipEl.dataset.clip : null, selText = textEl ? +textEl.dataset.text : null, selVoice = voiceEl ? +voiceEl.dataset.voice : null;
+    if ((clipEl || textEl || voiceEl) && (V.sel !== sel || V.selText !== selText || V.selVoice !== selVoice)) {
+      V.sel = sel; V.selText = selText; V.selVoice = selVoice;
       rebuildTL(); vPanel();
     }
     inner.setPointerCapture(e.pointerId);
@@ -556,7 +572,8 @@ function addFreezeFrame() {
   $('#delBtn').addEventListener('click', deleteVideoSelection);
 })();
 function deleteVideoSelection() {
-  if (V.selText) { V.texts = V.texts.filter(t => t.id !== V.selText); V.selText = null; }
+  if (V.selVoice) { const v = V.voices.find(x => x.id === V.selVoice); if (v) v.el.pause(); V.voices = V.voices.filter(x => x.id !== V.selVoice); V.selVoice = null; }
+  else if (V.selText) { V.texts = V.texts.filter(t => t.id !== V.selText); V.selText = null; }
   else if (V.sel) { pause(); V.clips = V.clips.filter(c => c.id !== V.sel); V.texts = V.texts.filter(t => t.clip !== V.sel); V.sel = null; }
   else { toast('先在時間軸上點選片段或文字'); return; }
   rebuildTL(); vPanel(); seek(V.t);
@@ -569,6 +586,18 @@ function vPanel() {
   el.replaceChildren();
   const clip = V.clips.find(c => c.id === V.sel), text = V.texts.find(t => t.id === V.selText);
   const refresh = () => { rebuildTL(); drawFrame(); };
+  const voice = !clip && !text ? V.voices.find(v => v.id === V.selVoice) : null;
+  if (voice) {
+    el.append(h('h2', { text: voice.kind === 'tts' ? '虛擬人聲' : '錄音' }), h('p', { text: voice.text || voice.name }));
+    el.append(h('button', { class: 'btn primary wide', text: '從這段的開頭播放', onclick: () => { pause(); seek(voice.start); play(); } }));
+    slider(el, { label: '音量', min: 0, max: 200, step: 5, value: Math.round(voice.vol * 100), def: 100, fmt: v => v + '%', onInput: v => { voice.vol = v / 100; setGain(voice.el, voice.vol); } });
+    slider(el, { label: '開始時間', min: 0, max: Math.max(0.1, totalDur()), step: 0.1, value: voice.start, fmt: v => fmtTime(v), onStart: pause, onInput: v => { voice.start = v; rebuildTL(); } });
+    el.append(h('button', { class: 'btn wide', text: '移到播放頭的位置（' + fmtTime(V.t) + '）', onclick: () => { pause(); voice.start = clamp(V.t, 0, Math.max(0, totalDur() - 0.1)); rebuildTL(); vPanel(); } }));
+    el.append(h('p', { text: '長度 ' + voice.dur.toFixed(1) + ' 秒。超過影片結尾的部分不會被匯出。' }));
+    el.append(h('button', { class: 'btn danger wide', text: '刪除這段' + (voice.kind === 'tts' ? '人聲' : '錄音'), onclick: deleteVideoSelection }));
+    el.append(h('button', { class: 'btn ghost wide', text: '回到影片設定', onclick: () => { V.selVoice = null; rebuildTL(); vPanel(); } }));
+    return;
+  }
 
   if (clip) {
     el.append(h('h2', { text: '片段設定' }), h('p', { text: clip.name }));
@@ -676,7 +705,24 @@ function vPanel() {
       addClipText(L.clip);
     }
   }));
-  el.append(h('button', { class: 'btn wide', text: V.music ? '換一首配樂' : '加入配樂（搜尋、貼網址或選檔）', onclick: openMusicDialog }));
+  el.append(h('button', {
+    class: 'btn wide', text: V.music ? '換一首配樂' : MS.lib.length ? '加入配樂（套用上次用的）' : '加入配樂（搜尋、貼網址或選檔）',
+    onclick: () => {
+      // 之前下載、用過的音樂直接套用最近的一首；想換再按「換一首配樂」
+      if (!V.music && MS.lib.length) { const it = MS.lib[0]; finishMusic(it.file, { title: it.title, credit: it.credit }); toast('已套用上次用的音樂「' + it.title + '」。想換別首請按「換一首配樂」。', 5000); }
+      else openMusicDialog();
+    }
+  }));
+  el.append(h('button', { class: 'btn wide', text: '加入錄音', onclick: openRecordDialog }));
+  el.append(h('button', { class: 'btn wide', text: '加入虛擬人聲（打字變語音）', onclick: openTtsDialog }));
+  if (V.voices.length) {
+    el = group(root, 'proj.voices', '錄音與人聲（' + V.voices.length + ' 段）', true);
+    el.append(h('div', { class: 'chips' }, V.voices.map(v => h('button', {
+      class: 'btn', text: (v.kind === 'tts' ? '人聲：' : '錄音：') + v.name.slice(0, 10) + '　' + fmtTime(v.start), title: '調整這一段',
+      onclick: () => { V.selVoice = v.id; V.sel = V.selText = null; rebuildTL(); vPanel(); }
+    }))));
+    el = root;
+  }
   if (V.music) {
     const m = V.music;
     el = group(root, 'proj.music', '配樂：' + m.name);

@@ -78,7 +78,7 @@ async function openForMode(files) {
 
 // ── 匯出視窗：格式、尺寸、畫質都在這裡選 ──
 const PHOTO_SIZES = [['0', '原始大小'], ['1080', '長邊 1080'], ['1920', '長邊 1920'], ['2560', '長邊 2560'], ['3840', '長邊 3840（4K）'], ['x2', '放大 2 倍']];
-function closeExportDialog() { $('#dlg').hidden = true; stopMusicPreview(); }
+function closeExportDialog() { $('#dlg').hidden = true; stopMusicPreview(); voiceDialogClosed(); }
 function openExportDialog() {
   const mode = MODE, e = EXP[mode], card = $('#dlgCard');
   if (mode === 'video' && totalDur() <= 0) { toast('先加入影片或圖片'); return; }
@@ -229,5 +229,6 @@ initPhoto();
 initCollage();
 initVideo();
 initAvatar();
+loadMusicLib();
 drawHomePreviews();
 setMode('home');
