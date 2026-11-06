@@ -74,7 +74,7 @@ const P = {
   brushMode: 'doodle', brushColor: '#ff5d8f', brushSize: { doodle: 30, mosaic: 40, erase: 40, liquify: 45, retouch: 35, mask: 30, mark: 35 },
   cut: null, cutModel: 'Xenova/modnet', maskBrush: '', mark: null, wmMode: 'rect',
   hsl: {}, hslBand: 'red', fx: { type: 'none', amt: 60 }, zoom: 1,
-  liqOn: false, liqStrength: 50, compare: false
+  liqOn: false, liqStrength: 50, compare: false, autoObj: true, markPts: null
 };
 function resetAdj() { for (const [k] of ADJ) P.adj[k] = 0; }
 resetAdj();
@@ -872,6 +872,7 @@ function startStroke(br, p) {
   if (br === 'mark') {
     // 標記不算一步編輯，不進復原紀錄
     if (!P.mark || P.mark.width !== P.base.width || P.mark.height !== P.base.height) P.mark = mk(P.base.width, P.base.height);
+    P.markPts = [p];
     stroke(br, p, p);
     return;
   }
@@ -892,6 +893,7 @@ function startStroke(br, p) {
 function stroke(br, a, b) {
   if (br === 'retouch') { retouchDab(a, b); return; }
   const d = brushPx(br);
+  if (br === 'mark' && P.markPts) P.markPts.push(b);
   if (br === 'mark' || br === 'maskAdd' || br === 'maskErase') {
     const x = (br === 'mark' ? P.mark : P.cut.mask).getContext('2d');
     x.save();
@@ -1100,7 +1102,28 @@ PV.addEventListener('pointermove', e => {
   }
   requestRender();
 });
-const endDrag = () => { const moved = drag && drag.type === 'cut' && drag.moved; drag = null; retouchEnd(); if (moved) showTool('cutout'); };
+const endDrag = () => {
+  const moved = drag && drag.type === 'cut' && drag.moved, marked = drag && drag.type === 'brush' && drag.br === 'mark' && P.tool === 'remove';
+  drag = null; retouchEnd();
+  if (moved) showTool('cutout');
+  if (marked && P.autoObj && P.markPts) { const pts = P.markPts; P.markPts = null; selectWholeObject(pts); }
+};
+// 清除：塗到哪個人、動物、物品，就自動把整個範圍標成紅色
+let autoObjTold = false;
+async function selectWholeObject(pts) {
+  const base = P.base, step = Math.max(1, Math.floor(pts.length / 8)), pick = pts.filter((p, i) => i % step === 0).slice(0, 10);
+  try {
+    const sel = await aiSegment(base, pick);
+    if (P.base !== base || !P.mark) return;
+    if (!sel) { toast('找不到完整的物件，只會清除塗到的地方'); return; }
+    P.mark.getContext('2d').drawImage(sel, 0, 0);
+    requestRender();
+    if (!autoObjTold) { autoObjTold = true; toast('已自動選取整個物件（紅色範圍）。確認後按「清除塗紅的地方」；選錯了可以按「重新塗」。', 6000); }
+  } catch (e) {
+    if (e.message === 'cancelled') return;
+    toast(e.message === 'busy' ? '還在找上一個物件，請稍等一下再塗' : '自動選取無法使用，只會清除塗到的地方', 4500);
+  }
+}
 PV.addEventListener('pointerup', endDrag);
 PV.addEventListener('pointercancel', endDrag);
 PV.addEventListener('pointerleave', () => { $('#brushRing').hidden = true; });
@@ -1349,16 +1372,18 @@ const PANELS = {
     chips(el, [['tl', '左上角'], ['tr', '右上角'], ['bl', '左下角'], ['br', '右下角']], '', markCorner);
     el.append(h('button', { class: 'btn primary wide', text: '去除標記的地方', onclick: runRemove }));
     el.append(h('button', { class: 'btn wide', text: '重新標記（清掉紅色）', onclick: () => { P.mark = null; requestRender(); } }));
-    el.append(h('p', { text: '標記要把整個浮水印蓋住、稍微大一點沒關係。第一次使用要下載約 208MB 的 AI 模型，每次處理大約半分鐘。蓋滿整張圖的重複浮水印效果不好。' }));
+    el.append(h('p', { text: '標記要把整個浮水印蓋住、稍微大一點沒關係。第一次使用要下載約 93MB 的 AI 模型，每次處理大約半分鐘。蓋滿整張圖的重複浮水印效果不好。' }));
     el.append(h('p', { text: '請只用在你自己的照片，或你有權使用的圖片上。' }));
   },
   remove(el) {
     el.append(h('h2', { text: '清除物件' }));
-    el.append(h('p', { text: '把不要的路人、雜物、電線塗成紅色，再按下面的按鈕，會自動補上背景。塗的時候把整個東西連同影子都蓋住，效果最好。' }));
+    el.append(h('p', { text: P.autoObj ? '在不要的人、動物或物品上塗一下，會自動把整個範圍標成紅色，再按下面的按鈕就會清掉並補上背景。影子沒被選到的話，再塗一下影子。'
+      : '把不要的路人、雜物、電線塗成紅色，再按下面的按鈕，會自動補上背景。塗的時候把整個東西連同影子都蓋住，效果最好。' }));
+    el.append(h('button', { class: 'btn wide', 'aria-pressed': String(P.autoObj), text: '自動選取整個物件：' + (P.autoObj ? '開' : '關'), onclick: () => { P.autoObj = !P.autoObj; showTool('remove'); } }));
     slider(el, { label: '筆刷大小', min: 1, max: 100, value: P.brushSize.mark, onInput: v => { P.brushSize.mark = v; } });
     el.append(h('button', { class: 'btn primary wide', text: '清除塗紅的地方', onclick: runRemove }));
     el.append(h('button', { class: 'btn wide', text: '重新塗（清掉紅色標記）', onclick: () => { P.mark = null; requestRender(); } }));
-    el.append(h('p', { text: '第一次使用要下載約 208MB 的 AI 模型；每次清除大約需要半分鐘。一次清一樣東西，結果會比一次清很多樣好。' }));
+    el.append(h('p', { text: '第一次使用要下載約 110MB 的 AI 模型；每次清除大約需要半分鐘。一次清一樣東西，結果會比一次清很多樣好。電線、文字這類細長的東西，可以把「自動選取」關掉自己塗。' }));
   },
   crop(el) {
     const root = el;

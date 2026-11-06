@@ -800,6 +800,22 @@ function loadMuxer() {
     document.head.append(sc);
   });
 }
+async function encoderWorks(cfg) {
+  let n = 0, ve;
+  try {
+    ve = new VideoEncoder({ output: () => n++, error: () => {} });
+    ve.configure(cfg);
+    const c = mk(cfg.width, cfg.height), x = c.getContext('2d');
+    for (let i = 0; i < 6; i++) {
+      x.fillStyle = 'hsl(' + i * 40 + ',60%,50%)'; x.fillRect(0, 0, c.width, c.height);
+      const f = new VideoFrame(c, { timestamp: i * 33333 });
+      ve.encode(f, { keyFrame: i === 0 }); f.close();
+    }
+    const ok = await Promise.race([ve.flush().then(() => true, () => false), new Promise(r => setTimeout(() => r(false), 2500))]);
+    return ok && n >= 6;
+  } catch (e) { return false; }
+  finally { try { if (ve && ve.state !== 'closed') ve.close(); } catch (e) { /* 略過 */ } }
+}
 async function makeMp4Encoder(w, hh, fps, bitrate) {
   if (!window.VideoEncoder || !window.AudioEncoder || !window.VideoFrame || !window.AudioData || !V.audio) return null;
   try { await loadMuxer(); } catch (e) { return null; }
@@ -810,6 +826,11 @@ async function makeMp4Encoder(w, hh, fps, bitrate) {
   for (const lv of levels.slice(start)) {
     const cfg = { codec: 'avc1.' + lv, width: w, height: hh, bitrate, framerate: fps, avc: { format: 'avc' } };
     try { if ((await VideoEncoder.isConfigSupported(cfg)).supported) { vcfg = cfg; break; } } catch (e) { /* 試下一個 */ }
+  }
+  // 有些電腦的預設編碼器會編幾格就停住（匯出會一直卡在「正在完成檔案」）：先試編幾格，卡住就改用軟體編碼器
+  if (vcfg && !(await encoderWorks(vcfg))) {
+    const soft = { ...vcfg, hardwareAcceleration: 'prefer-software' };
+    try { vcfg = (await VideoEncoder.isConfigSupported(soft)).supported && (await encoderWorks(soft)) ? soft : null; } catch (e) { vcfg = null; }
   }
   const sr = V.audio.ac.sampleRate, acfg = { codec: 'mp4a.40.2', sampleRate: sr, numberOfChannels: 2, bitrate: 160000 };
   let audioOk = false;

@@ -1,13 +1,23 @@
 // AI 影像功能：去背（找出主體）和清除物件（把塗掉的地方補起來）
 // 模型在背景執行緒裡跑，照片不會上傳；第一次使用要下載模型，之後瀏覽器會留著
-const AI = { worker: null, job: null };
+const AI = { worker: null, job: null, kind: '', samFor: null };
 const AI_MATTE_MODELS = [['Xenova/modnet', '人像、寵物（快，25MB）'], ['onnx-community/ISNet-ONNX', '物品、一般（精準，176MB）']];
 
 const AI_WORKER_SRC = `
 const TF_URL = 'https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.8.1';
 const ORT_URL = 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.22.0/dist/';
-const LAMA_URL = 'https://huggingface.co/Carve/LaMa-ONNX/resolve/main/lama_fp32.onnx';
-let TF = null, ORT = null, lama = null;
+// 清除用的 LaMa：OpenCV 整理過的版本（93MB），補出來的效果跟原版（208MB）差不多，記憶體少用約三成，手機才跑得動
+const LAMA_URL = 'https://huggingface.co/opencv/inpainting_lama/resolve/main/inpainting_lama_2025jan.onnx';
+const OLD_LAMA_URL = 'https://huggingface.co/Carve/LaMa-ONNX/resolve/main/lama_fp32.onnx';
+// 塗一下就找出整個物件：MobileSAM（Segment Anything 的輕量版，編碼器 28MB＋解碼器 16MB）。
+// 原版 SAM／SlimSAM 的全域注意力在手機上會吃掉將近 2GB 記憶體，MobileSAM 只要幾百 MB
+const SAM_ENC_URL = 'https://huggingface.co/Acly/MobileSAM/resolve/main/mobile_sam_image_encoder.onnx';
+const SAM_DEC_URL = 'https://huggingface.co/Acly/MobileSAM/resolve/main/sam_mask_decoder_multi.onnx';
+let TF = null, ORT = null, lama = null, samEnc = null, samDec = null, samEmb = null, samSize = null;
+async function loadOrt() {
+  if (!ORT) { ORT = await import(ORT_URL + 'ort.min.mjs'); ORT.env.wasm.wasmPaths = ORT_URL; ORT.env.logLevel = 'error'; }
+}
+const ORT_OPTS = { executionProviders: ['wasm'], enableCpuMemArena: false, enableMemPattern: false };
 const pipes = {};
 const post = (m, t) => self.postMessage(m, t || []);
 
@@ -17,17 +27,19 @@ async function fetchCached(url) {
   try { cache = await caches.open('ai-models'); const hit = await cache.match(url); if (hit) return await hit.arrayBuffer(); } catch (e) { cache = null; }
   const res = await fetch(url);
   if (!res.ok) throw new Error('http ' + res.status);
-  const total = +res.headers.get('content-length') || 0, reader = res.body.getReader(), chunks = [];
-  let got = 0;
+  // 直接寫進一塊預先配好的記憶體，不要先存成很多小塊再合併（那樣會同時佔兩三倍的記憶體，手機會當掉）
+  const total = +res.headers.get('content-length') || 0, reader = res.body.getReader();
+  let buf = new Uint8Array(total || 1 << 20), got = 0;
   for (;;) {
     const { done, value } = await reader.read();
     if (done) break;
-    chunks.push(value); got += value.length;
+    if (got + value.length > buf.length) { const bigger = new Uint8Array(Math.max(buf.length * 2, got + value.length)); bigger.set(buf.subarray(0, got)); buf = bigger; }
+    buf.set(value, got); got += value.length;
     post({ type: 'download', progress: total ? got / total : 0 });
   }
-  const blob = new Blob(chunks);
-  try { if (cache) await cache.put(url, new Response(blob)); } catch (e) { /* 快取滿了就算了 */ }
-  return await blob.arrayBuffer();
+  if (got !== buf.length) buf = buf.slice(0, got);
+  try { if (cache) { await cache.put(url, new Response(buf)); await cache.delete(OLD_LAMA_URL); } } catch (e) { /* 快取滿了就算了 */ }
+  return buf;
 }
 
 self.onmessage = async e => {
@@ -47,8 +59,13 @@ self.onmessage = async e => {
       for (let i = 0; i < n; i++) alpha[i] = im.data[i * ch + ch - 1];
       post({ type: 'done', alpha, w: im.width, h: im.height }, [alpha.buffer]);
     } else if (m.type === 'inpaint') {
-      if (!ORT) { ORT = await import(ORT_URL + 'ort.min.mjs'); ORT.env.wasm.wasmPaths = ORT_URL; ORT.env.logLevel = 'error'; }
-      if (!lama) lama = await ORT.InferenceSession.create(await fetchCached(LAMA_URL), { executionProviders: ['wasm'] });
+      await loadOrt();
+      if (!lama) {
+        let bytes = await fetchCached(LAMA_URL);
+        post({ type: 'stage', text: '正在載入 AI 模型…' });
+        lama = await ORT.InferenceSession.create(bytes, ORT_OPTS);
+        bytes = null;
+      }
       post({ type: 'stage', text: '正在補上背景…大約需要半分鐘' });
       const N = 512, px = new Uint8ClampedArray(m.data), hole = new Uint8Array(m.mask);
       const img = new Float32Array(3 * N * N), mask = new Float32Array(N * N);
@@ -62,6 +79,38 @@ self.onmessage = async e => {
       const r = (await lama.run(feeds))[lama.outputNames[0]].data, out = new Uint8ClampedArray(N * N * 4);
       for (let i = 0; i < N * N; i++) { out[i * 4] = r[i]; out[i * 4 + 1] = r[N * N + i]; out[i * 4 + 2] = r[2 * N * N + i]; out[i * 4 + 3] = 255; }
       post({ type: 'done', data: out.buffer }, [out.buffer]);
+    } else if (m.type === 'segment') {
+      await loadOrt();
+      if (!samDec) {
+        samEnc = await ORT.InferenceSession.create(await fetchCached(SAM_ENC_URL), ORT_OPTS);
+        samDec = await ORT.InferenceSession.create(await fetchCached(SAM_DEC_URL), ORT_OPTS);
+      }
+      if (m.data) {
+        // 同一張照片只要分析一次（約 1 秒），之後每次塗抹只跑很快的解碼器
+        post({ type: 'stage', text: '正在分析照片…' });
+        const px = new Uint8ClampedArray(m.data), n = m.w * m.h, img = new Float32Array(n * 3);
+        for (let i = 0; i < n * 3; i++) img[i] = px[i];
+        const r = await samEnc.run({ input_image: new ORT.Tensor('float32', img, [m.h, m.w, 3]) });
+        samEmb = r.image_embeddings; samSize = [m.h, m.w];
+      }
+      if (!samEmb) throw new Error('no image');
+      post({ type: 'stage', text: '正在找出整個物件…' });
+      // 點的座標換成模型內部（長邊 1024）的座標；有框的話框的兩角用標籤 2、3，沒有框時要補一個空白點（標籤 -1）
+      const k = 1024 / Math.max(samSize[0], samSize[1]), pts = m.points.map(p => [p[0], p[1], 1]);
+      if (m.box) pts.push([m.box[0], m.box[1], 2], [m.box[2], m.box[3], 3]); else pts.push([0, 0, -1]);
+      const np = pts.length, coords = new Float32Array(np * 2), labels = new Float32Array(np);
+      pts.forEach((p, i) => { coords[i * 2] = p[0] * samSize[1] * k; coords[i * 2 + 1] = p[1] * samSize[0] * k; labels[i] = p[2]; });
+      const r = await samDec.run({
+        image_embeddings: samEmb,
+        point_coords: new ORT.Tensor('float32', coords, [1, np, 2]),
+        point_labels: new ORT.Tensor('float32', labels, [1, np]),
+        mask_input: new ORT.Tensor('float32', new Float32Array(256 * 256), [1, 1, 256, 256]),
+        has_mask_input: new ORT.Tensor('float32', new Float32Array([0]), [1]),
+        orig_im_size: new ORT.Tensor('float32', new Float32Array(samSize), [2])
+      });
+      const md = r.masks.data, dims = r.masks.dims, data = new Uint8Array(md.length);
+      for (let i = 0; i < md.length; i++) data[i] = md[i] > 0 ? 1 : 0;
+      post({ type: 'done', masks: data, scores: Array.from(r.iou_predictions.data), w: dims[3], h: dims[2], count: dims[1] }, [data.buffer]);
     }
   } catch (err) {
     post({ type: 'error', message: String((err && err.message) || err) });
@@ -76,9 +125,18 @@ function aiStatus(text, progress) {
   $('#aiText').textContent = text;
   $('#aiProgress').style.width = Math.round(clamp(progress == null ? 1 : progress, 0, 1) * 100) + '%';
 }
+function aiDrop() { if (AI.worker) AI.worker.terminate(); AI.worker = null; AI.kind = ''; AI.samFor = null; }
+// 手機記憶體少：清除用的大模型和其他模型不要同時留在記憶體裡，換另一種之前先把背景執行緒整個關掉
+function aiEnsure(kind) {
+  if (AI.job) return;
+  if (AI.worker && AI.kind && AI.kind !== kind && isTouchDevice()) aiDrop();
+  AI.kind = kind;
+}
 function aiCall(msg, transfer, label) {
   return new Promise((resolve, reject) => {
     if (AI.job) { reject(new Error('busy')); return; }
+    clearTimeout(AI.idle);
+    aiEnsure(msg.type === 'matte' ? 'tf' : 'ort');
     if (!AI.worker) AI.worker = new Worker(URL.createObjectURL(new Blob([AI_WORKER_SRC], { type: 'text/javascript' })), { type: 'module' });
     const w = AI.worker, fail = err => { AI.job = null; aiStatus(null); reject(err); };
     AI.job = { reject };
@@ -87,14 +145,19 @@ function aiCall(msg, transfer, label) {
       const m = e.data;
       if (m.type === 'download') aiStatus('第一次使用，正在下載 AI 模型…（之後不用再下載）', m.progress);
       else if (m.type === 'stage') aiStatus(m.text, 1);
-      else if (m.type === 'done') { AI.job = null; aiStatus(null); resolve(m); }
+      else if (m.type === 'done') {
+        AI.job = null; aiStatus(null);
+        // 手機上用完一陣子沒再用，就把模型從記憶體放掉，免得之後做別的事（例如匯出）時記憶體不夠而當掉
+        if (isTouchDevice()) AI.idle = setTimeout(() => { if (!AI.job) aiDrop(); }, 90000);
+        resolve(m);
+      }
       else if (m.type === 'error') {
         // 出錯後這個執行緒的狀態不可靠，下次重開
-        w.terminate(); AI.worker = null;
+        aiDrop();
         fail(new Error(m.message));
       }
     };
-    w.onerror = e => { e.preventDefault(); w.terminate(); AI.worker = null; fail(new Error('load')); };
+    w.onerror = e => { e.preventDefault(); aiDrop(); fail(new Error('load')); };
     w.postMessage(msg, transfer);
   });
 }
@@ -102,7 +165,7 @@ function aiCancel() {
   if (AV.busy) AV.cancel = true;   // 虛擬人製作影片時也是用這個進度條
   if (!AI.job) return;
   const job = AI.job;
-  AI.worker.terminate(); AI.worker = null; AI.job = null;
+  aiDrop(); AI.job = null;
   aiStatus(null);
   job.reject(new Error('cancelled'));
   toast('已取消');
@@ -239,6 +302,64 @@ async function aiMatte(src, model, opts) {
   rx.drawImage(src, box.x, box.y, box.w, box.h, 0, 0, region.width, region.height);
   fx.drawImage(refineMatte(lo, region), box.x, box.y, box.w, box.h);
   return full;
+}
+
+// 從塗抹的幾個點找出整個物件（人、動物、物品），回傳跟 base 一樣大的紅色遮罩畫布；找不到合理的範圍時回傳 null
+async function aiSegment(base, pts) {
+  aiEnsure('ort');
+  // 模型要長邊剛好 1024 的圖（小圖也要放大），座標才對得上
+  const s = 1024 / Math.max(base.width, base.height), w = Math.round(base.width * s), hh = Math.round(base.height * s);
+  const msg = { type: 'segment', points: pts.map(p => [p.x / base.width, p.y / base.height]) }, tr = [];
+  if (AI.samFor !== base || !AI.worker) {
+    const c = mk(w, hh), x = c.getContext('2d');
+    x.imageSmoothingQuality = 'high';
+    x.drawImage(base, 0, 0, w, hh);
+    const d = x.getImageData(0, 0, w, hh).data, rgb = new Uint8ClampedArray(w * hh * 3);
+    for (let i = 0, j = 0; i < d.length; i += 4, j += 3) { rgb[j] = d[i]; rgb[j + 1] = d[i + 1]; rgb[j + 2] = d[i + 2]; }
+    Object.assign(msg, { data: rgb.buffer, w, h: hh });
+    tr.push(rgb.buffer);
+  }
+  AI.samFor = null;
+  let m = await aiCall(msg, tr, '正在找出整個物件…');
+  AI.samFor = base;
+  let pick = pickMask(m, base, pts);
+  if (!pick) return null;
+  // 第二次：拿第一次找到的範圍（往外放大一點）當框再找一次，物件比較不會缺一塊（例如只選到身體、漏掉頭）
+  {
+    const n = m.w * m.h;
+    let x0 = m.w, y0 = m.h, x1 = -1, y1 = -1;
+    for (let y = 0; y < m.h; y++) for (let x = 0; x < m.w; x++) if (m.masks[pick.k * n + y * m.w + x]) { if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; }
+    const px = (x1 - x0) * 0.15 + 2, py = (y1 - y0) * 0.15 + 2;
+    const box = [Math.max(0, x0 - px) / m.w, Math.max(0, y0 - py) / m.h, Math.min(m.w, x1 + px) / m.w, Math.min(m.h, y1 + py) / m.h];
+    try {
+      const m2 = await aiCall({ type: 'segment', points: msg.points, box }, [], '正在找出整個物件…'), p2 = pickMask(m2, base, pts);
+      // 新範圍要大致落在框裡、也不能大太多，否則代表連旁邊的東西（例如另一隻貓）一起選進來了
+      let out = 0;
+      if (p2) { const n2 = m2.w * m2.h, bx0 = box[0] * m2.w, by0 = box[1] * m2.h, bx1 = box[2] * m2.w, by1 = box[3] * m2.h; for (let y = 0; y < m2.h; y++) for (let x = 0; x < m2.w; x++) if (m2.masks[p2.k * n2 + y * m2.w + x] && (x < bx0 || x > bx1 || y < by0 || y > by1)) out++; }
+      if (p2 && p2.area >= pick.area * 0.9 && p2.area <= pick.area * 1.8 && out < p2.area * 0.03) { m = m2; pick = p2; }
+    } catch (e) { if (e.message === 'cancelled') throw e; }
+  }
+  const n = m.w * m.h, small = mk(m.w, m.h), id = new ImageData(m.w, m.h);
+  for (let i = 0; i < n; i++) if (m.masks[pick.k * n + i]) { id.data[i * 4] = 255; id.data[i * 4 + 1] = 60; id.data[i * 4 + 2] = 90; id.data[i * 4 + 3] = 255; }
+  small.getContext('2d').putImageData(id, 0, 0);
+  const full = mk(base.width, base.height), fx = full.getContext('2d');
+  fx.imageSmoothingQuality = 'high';
+  fx.drawImage(small, 0, 0, base.width, base.height);
+  return full;
+}
+// 模型給好幾種大小的範圍（局部、中等、整個），挑「有蓋到塗抹的地方、不會大到半張照片」裡最完整的那個
+function pickMask(m, base, pts) {
+  const n = m.w * m.h, inside = (k, p) => m.masks[k * n + Math.min(m.h - 1, Math.floor(p.y / base.height * m.h)) * m.w + Math.min(m.w - 1, Math.floor(p.x / base.width * m.w))];
+  const cand = [];
+  for (let k = 0; k < m.count; k++) {
+    let area = 0;
+    for (let i = k * n; i < (k + 1) * n; i++) area += m.masks[i];
+    const hits = pts.filter(p => inside(k, p)).length;
+    if (area > 0 && area < 0.6 * n && hits >= 0.6 * pts.length) cand.push({ k, area, score: m.scores[k] });
+  }
+  if (!cand.length) return null;
+  const best = Math.max(...cand.map(c => c.score));
+  return cand.filter(c => c.score >= best - 0.08).sort((a, b) => b.area - a.area)[0];
 }
 
 // 把 mark 畫布上塗過的地方從 base 清掉並補上背景，回傳新的畫布；沒有塗抹時回傳 null。
