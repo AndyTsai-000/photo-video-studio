@@ -3,7 +3,7 @@ const CV2 = $('#cv2');
 const COLLAGE_SIDE = 2400;
 const COLLAGE_MAX = 15;   // 一張拼圖最多幾張照片
 const C = {
-  imgs: [], layout: 0, gap: 2, radius: 2, bg: '#ffffff', ratio: '1:1', sel: -1
+  imgs: [], layout: 0, gap: 0, radius: 0, bg: '#ffffff', ratio: '1:1', sel: -1
 };
 const RATIOS = { '1:1': [1, 1], '3:4': [3, 4], '4:3': [4, 3], '9:16': [9, 16], '16:9': [16, 9] };
 
@@ -231,8 +231,8 @@ function collagePanel() {
   el = group(root, 'col.ratio', '畫布比例');
   chips(el, Object.keys(RATIOS).map(k => [k, k]).concat([['v', '直向長圖'], ['h', '橫向長圖']]), C.ratio, v => { C.ratio = v; collagePanel(); drawCollage(); });
   el = group(root, 'col.gap', '間距與圓角');
-  slider(el, { label: '間距', min: 0, max: 8, step: 0.5, value: C.gap, def: 2, onInput: v => { C.gap = v; drawCollage(); } });
-  slider(el, { label: '圓角', min: 0, max: 12, step: 0.5, value: C.radius, def: 2, onInput: v => { C.radius = v; drawCollage(); } });
+  slider(el, { label: '間距', min: 0, max: 8, step: 0.5, value: C.gap, def: 0, onInput: v => { C.gap = v; drawCollage(); } });
+  slider(el, { label: '圓角', min: 0, max: 12, step: 0.5, value: C.radius, def: 0, onInput: v => { C.radius = v; drawCollage(); } });
   el = group(root, 'col.bg', '底色');
   swatches(el, ['#ffffff', '#1a1a1a', '#f3e9dc', '#ffd9e4', '#d9f2ee'], C.bg, c => { C.bg = c; drawCollage(); });
 
