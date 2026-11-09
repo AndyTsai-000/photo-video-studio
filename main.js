@@ -23,6 +23,7 @@ function saveExp() {
 }
 
 function setMode(mode) {
+  hideDoneBar();
   if (MODE === 'video' && mode !== 'video') pause();
   if (MODE === 'avatar' && mode !== 'avatar') { avatarStop(); if (AV.rec) AV.rec.stop(); }
   MODE = mode;
@@ -137,6 +138,39 @@ function openExportDialog() {
     })));
   $('#dlg').hidden = false;
 }
+// ── 匯出完成後的「接下來」：再做一件新作品、繼續修改這件，或回首頁 ──
+// 新作品都是先選好檔案才清掉目前的內容；在選檔視窗按取消的話，什麼都不會變
+const NEXT_WORK = {
+  photo: ['再修一張', async () => { const [f] = await pickFiles($('#fileImg')); if (f) openForMode([f]); }],
+  collage: ['再拼一張', async () => {
+    const files = (await pickFiles($('#fileImgs'))).filter(f => f.type.startsWith('image/'));
+    if (!files.length) return;
+    C.imgs = []; C.sel = -1; C.layout = 0;
+    addCollageFiles(files);
+  }],
+  video: ['剪新影片', async () => {
+    const files = await pickFiles($('#fileMedia'));
+    if (!files.length) return;
+    newVideoProject();
+    addMedia(files);
+  }],
+  avatar: ['換照片再做一支', async () => { const [f] = await pickFiles($('#fileImg')); if (f) setAvatarPhoto(f); }]
+};
+let doneTimer = 0;
+function hideDoneBar() { clearTimeout(doneTimer); $('#doneBar').hidden = true; }
+function showDoneBar() {
+  const mode = MODE, next = NEXT_WORK[mode];
+  if (!next) return;
+  const box = $('#doneActions');
+  box.replaceChildren(
+    h('button', { class: 'btn primary', text: next[0], onclick: () => { hideDoneBar(); next[1](); } }),
+    h('button', { class: 'btn', text: '繼續修改', title: '留在這件作品，繼續編輯', onclick: hideDoneBar }),
+    h('button', { class: 'btn ghost', text: '回首頁', onclick: () => setMode('home') }));
+  $('#doneBar').hidden = false;
+  clearTimeout(doneTimer);
+  doneTimer = setTimeout(hideDoneBar, 25000);
+}
+$('#doneClose').addEventListener('click', hideDoneBar);
 $('#dlg').addEventListener('pointerdown', e => { if (e.target.id === 'dlg') closeExportDialog(); });
 
 $$('.modes button').forEach(b => b.addEventListener('click', () => setMode(b.dataset.mode)));

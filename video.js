@@ -1200,6 +1200,16 @@ function vRestore(st) {
   setVideoSize(); rebuildTL(); vPanel(); seek(Math.min(V.t, totalDur()));
   syncHistButtons();
 }
+// 開一個新的剪輯專案：清掉片段、文字、配樂和錄音（畫面比例和浮水印保留），復原紀錄也重來
+function newVideoProject() {
+  pause();
+  if (typeof cancelStt === 'function') cancelStt();
+  if (V.music) V.music.el.pause();
+  for (const v of V.voices) v.el.pause();
+  V.clips = []; V.texts = []; V.music = null; V.voices = []; V.sel = V.selText = V.selVoice = null; V.t = 0;
+  VH.undo = []; VH.redo = []; VH.last = null; VH.key = '';
+  rebuildTL(); vPanel(); seek(0); vCommit();
+}
 function vUndo() { if (VH.undo.length) { VH.redo.push(VH.last); vRestore(VH.undo.pop()); } }
 function vRedo() { if (VH.redo.length) { VH.undo.push(VH.last); vRestore(VH.redo.pop()); } }
 

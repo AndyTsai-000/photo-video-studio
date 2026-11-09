@@ -60,6 +60,8 @@ function fit(canvas, zoom) {
 // ── 存檔：在 Claude 的頁面裡走 downloads 能力，其他地方用一般下載 ──
 async function saveFile(filename, blob, note) {
   if (!blob) { toast('產生檔案失敗'); return; }
+  // 圖片、影片匯出完：跳出「接下來」的按鈕，可以直接開始下一件作品
+  if (/^(image|video)\//.test(blob.type) && window.showDoneBar) setTimeout(showDoneBar, 0);
   if (window.claude && window.claude.use) {
     let d = null;
     try { d = await window.claude.use('downloads'); } catch (e) { d = null; }

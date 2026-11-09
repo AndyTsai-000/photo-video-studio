@@ -192,6 +192,11 @@
   <div class="progress"><div id="aiProgress"></div></div>
   <button id="aiCancel" class="btn small">取消</button>
 </div>
+<div class="done-bar" id="doneBar" role="status" hidden>
+  <strong id="doneText">作品已匯出！</strong>
+  <div class="done-actions" id="doneActions"></div>
+  <button class="done-close" id="doneClose" aria-label="關閉" title="關閉">×</button>
+</div>
 <div id="dlg" hidden><div class="export-card" id="dlgCard"></div></div>
 <div id="toast" role="status" aria-live="polite" hidden></div>
 
@@ -208,7 +213,7 @@
   }
   // 每次改版把 VERSION 加一。只有在 GitHub Pages 才加版本參數，避免瀏覽器繼續用舊的程式檔
   (function () {
-    var VERSION = '41', bust = /github\.io$/.test(location.hostname) ? '?v=' + VERSION : '';
+    var VERSION = '42', bust = /github\.io$/.test(location.hostname) ? '?v=' + VERSION : '';
     window.APP_VERSION = VERSION;
     if (bust) {
       var css = document.createElement('link');
