@@ -7,13 +7,32 @@ const AI_WORKER_SRC = `
 const TF_URL = 'https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.8.1';
 const ORT_URL = 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.22.0/dist/';
 // 清除用的 LaMa：OpenCV 整理過的版本（93MB），補出來的效果跟原版（208MB）差不多，記憶體少用約三成，手機才跑得動
-const LAMA_URL = 'https://huggingface.co/opencv/inpainting_lama/resolve/main/inpainting_lama_2025jan.onnx';
-const OLD_LAMA_URL = 'https://huggingface.co/Carve/LaMa-ONNX/resolve/main/lama_fp32.onnx';
+// 模型放在網站自己的 models 資料夾，權重已經壓成 int8（下載約原本的 1/4，推論時還原成浮點數，結果幾乎一樣）
+const OLD_URLS = ['https://huggingface.co/Carve/LaMa-ONNX/resolve/main/lama_fp32.onnx', 'https://huggingface.co/opencv/inpainting_lama/resolve/main/inpainting_lama_2025jan.onnx',
+  'https://huggingface.co/Acly/MobileSAM/resolve/main/mobile_sam_image_encoder.onnx', 'https://huggingface.co/Acly/MobileSAM/resolve/main/sam_mask_decoder_multi.onnx'];
 // 塗一下就找出整個物件：MobileSAM（Segment Anything 的輕量版，編碼器 28MB＋解碼器 16MB）。
 // 原版 SAM／SlimSAM 的全域注意力在手機上會吃掉將近 2GB 記憶體，MobileSAM 只要幾百 MB
-const SAM_ENC_URL = 'https://huggingface.co/Acly/MobileSAM/resolve/main/mobile_sam_image_encoder.onnx';
-const SAM_DEC_URL = 'https://huggingface.co/Acly/MobileSAM/resolve/main/sam_mask_decoder_multi.onnx';
-let TF = null, ORT = null, lama = null, samEnc = null, samDec = null, samEmb = null, samSize = null;
+let TF = null, ORT = null, samEmb = null, samSize = null;
+// 載入過的模型留在記憶體裡重複用；總大小超過上限（手機比較小）時，先放掉最久沒用的
+const sessions = new Map();
+async function getSession(url, budget) {
+  const hit = sessions.get(url);
+  if (hit) { hit.used = Date.now(); return hit.s; }
+  let bytes = await fetchCached(url);
+  const size = bytes.length;
+  let total = size;
+  for (const v of sessions.values()) total += v.size;
+  for (const [k, v] of [...sessions.entries()].sort((a, b) => a[1].used - b[1].used)) {
+    if (total <= (budget || 8e8)) break;
+    try { await v.s.release(); } catch (e) { /* 略過 */ }
+    sessions.delete(k); total -= v.size;
+  }
+  post({ type: 'stage', text: '正在載入 AI 模型…' });
+  const s = await ORT.InferenceSession.create(bytes, ORT_OPTS);
+  bytes = null;
+  sessions.set(url, { s, size, used: Date.now() });
+  return s;
+}
 async function loadOrt() {
   if (!ORT) { ORT = await import(ORT_URL + 'ort.min.mjs'); ORT.env.wasm.wasmPaths = ORT_URL; ORT.env.logLevel = 'error'; }
 }
@@ -38,7 +57,7 @@ async function fetchCached(url) {
     post({ type: 'download', progress: total ? got / total : 0 });
   }
   if (got !== buf.length) buf = buf.slice(0, got);
-  try { if (cache) { await cache.put(url, new Response(buf)); await cache.delete(OLD_LAMA_URL); } } catch (e) { /* 快取滿了就算了 */ }
+  try { if (cache) { await cache.put(url, new Response(buf)); for (const u of OLD_URLS) await cache.delete(u); } } catch (e) { /* 快取滿了就算了 */ }
   return buf;
 }
 
@@ -60,12 +79,7 @@ self.onmessage = async e => {
       post({ type: 'done', alpha, w: im.width, h: im.height }, [alpha.buffer]);
     } else if (m.type === 'inpaint') {
       await loadOrt();
-      if (!lama) {
-        let bytes = await fetchCached(LAMA_URL);
-        post({ type: 'stage', text: '正在載入 AI 模型…' });
-        lama = await ORT.InferenceSession.create(bytes, ORT_OPTS);
-        bytes = null;
-      }
+      const lama = await getSession(m.models + 'lama.onnx', m.budget);
       post({ type: 'stage', text: '正在補上背景…大約需要半分鐘' });
       const N = 512, px = new Uint8ClampedArray(m.data), hole = new Uint8Array(m.mask);
       const img = new Float32Array(3 * N * N), mask = new Float32Array(N * N);
@@ -81,10 +95,7 @@ self.onmessage = async e => {
       post({ type: 'done', data: out.buffer }, [out.buffer]);
     } else if (m.type === 'segment') {
       await loadOrt();
-      if (!samDec) {
-        samEnc = await ORT.InferenceSession.create(await fetchCached(SAM_ENC_URL), ORT_OPTS);
-        samDec = await ORT.InferenceSession.create(await fetchCached(SAM_DEC_URL), ORT_OPTS);
-      }
+      const samEnc = await getSession(m.models + 'sam_enc.onnx', m.budget), samDec = await getSession(m.models + 'sam_dec.onnx', m.budget);
       if (m.data) {
         // 同一張照片只要分析一次（約 1 秒），之後每次塗抹只跑很快的解碼器
         post({ type: 'stage', text: '正在分析照片…' });
@@ -111,6 +122,26 @@ self.onmessage = async e => {
       const md = r.masks.data, dims = r.masks.dims, data = new Uint8Array(md.length);
       for (let i = 0; i < md.length; i++) data[i] = md[i] > 0 ? 1 : 0;
       post({ type: 'done', masks: data, scores: Array.from(r.iou_predictions.data), w: dims[3], h: dims[2], count: dims[1] }, [data.buffer]);
+    } else if (m.type === 'run') {
+      // 通用：跑一個模型。輸入名稱對不上時用模型的第一個輸入；輸出另外用 output 這個名字放第一個結果
+      await loadOrt();
+      const s = await getSession(m.url, m.budget), feeds = {};
+      for (const k in m.feeds) { const f = m.feeds[k]; feeds[s.inputNames.includes(k) ? k : s.inputNames[0]] = new ORT.Tensor(f.type || 'float32', f.data, f.dims); }
+      const r = await s.run(feeds), out = {}, tr = [];
+      for (const k of s.outputNames) { out[k] = { data: r[k].data, dims: r[k].dims }; tr.push(r[k].data.buffer); }
+      out.output = out[s.outputNames[0]];
+      post({ type: 'done', out }, tr.filter((b, i) => tr.indexOf(b) === i));
+    } else if (m.type === 'skyseg') {
+      // 天空：SegFormer（ADE20K 場景分割，第 2 類是天空）
+      if (!TF) { TF = await import(TF_URL); TF.env.allowLocalModels = false; }
+      if (!pipes.sky) pipes.sky = await TF.pipeline('image-segmentation', 'Xenova/segformer-b2-finetuned-ade-512-512', {
+        dtype: 'q8', progress_callback: p => { if (p.status === 'progress' && p.file && p.file.endsWith('.onnx')) post({ type: 'download', progress: (p.progress || 0) / 100 }); }
+      });
+      post({ type: 'stage', text: '正在找出天空…' });
+      const res = await pipes.sky(new TF.RawImage(new Uint8ClampedArray(m.data), m.w, m.h, 4));
+      const sky = res.find(o => o.label === 'sky'), w = sky ? sky.mask.width : m.w, hh = sky ? sky.mask.height : m.h, mask = new Uint8Array(w * hh);
+      if (sky) { const d = sky.mask.data, ch = sky.mask.channels || 1; for (let i = 0; i < w * hh; i++) mask[i] = d[i * ch]; }
+      post({ type: 'done', mask, w, h: hh }, [mask.buffer]);
     }
   } catch (err) {
     post({ type: 'error', message: String((err && err.message) || err) });
@@ -132,19 +163,21 @@ function aiEnsure(kind) {
   if (AI.worker && AI.kind && AI.kind !== kind && isTouchDevice()) aiDrop();
   AI.kind = kind;
 }
-function aiCall(msg, transfer, label) {
+function aiCall(msg, transfer, label, progress) {
   return new Promise((resolve, reject) => {
     if (AI.job) { reject(new Error('busy')); return; }
     clearTimeout(AI.idle);
-    aiEnsure(msg.type === 'matte' ? 'tf' : 'ort');
+    aiEnsure(msg.type === 'matte' || msg.type === 'skyseg' ? 'tf' : 'ort');
+    msg.models = new URL('models/', location.href).href;
+    msg.budget = isTouchDevice() ? 1.7e8 : 8e8;
     if (!AI.worker) AI.worker = new Worker(URL.createObjectURL(new Blob([AI_WORKER_SRC], { type: 'text/javascript' })), { type: 'module' });
     const w = AI.worker, fail = err => { AI.job = null; aiStatus(null); reject(err); };
     AI.job = { reject };
-    aiStatus(label, 1);
+    aiStatus(label, progress == null ? 1 : progress);
     w.onmessage = e => {
       const m = e.data;
       if (m.type === 'download') aiStatus('第一次使用，正在下載 AI 模型…（之後不用再下載）', m.progress);
-      else if (m.type === 'stage') aiStatus(m.text, 1);
+      else if (m.type === 'stage') aiStatus(m.text, progress == null ? 1 : progress);
       else if (m.type === 'done') {
         AI.job = null; aiStatus(null);
         // 手機上用完一陣子沒再用，就把模型從記憶體放掉，免得之後做別的事（例如匯出）時記憶體不夠而當掉

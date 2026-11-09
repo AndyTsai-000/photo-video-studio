@@ -49,7 +49,7 @@
         <button class="home-card" data-go="photo">
           <canvas id="homePhoto" width="480" height="300"></canvas>
           <strong>修圖</strong>
-          <span>調色、濾鏡、美顏瘦臉、裁切拉正、文字貼圖、馬賽克、邊框</span>
+          <span>調色濾鏡、美顏五官化妝、長腿瘦身、換天空、換髮色、證件照、AI 修復老照片</span>
         </button>
         <button class="home-card" data-go="collage">
           <canvas id="homeCollage" width="480" height="300"></canvas>
@@ -213,14 +213,14 @@
   }
   // 每次改版把 VERSION 加一。只有在 GitHub Pages 才加版本參數，避免瀏覽器繼續用舊的程式檔
   (function () {
-    var VERSION = '43', bust = /github\.io$/.test(location.hostname) ? '?v=' + VERSION : '';
+    var VERSION = '44', bust = /github\.io$/.test(location.hostname) ? '?v=' + VERSION : '';
     window.APP_VERSION = VERSION;
     if (bust) {
       var css = document.createElement('link');
       css.rel = 'stylesheet'; css.href = 'app.css' + bust;
       document.head.appendChild(css);
     }
-    ['core', 'ai', 'photo', 'collage', 'video', 'stt', 'music', 'auto', 'rig', 'avatar', 'voice', 'main'].forEach(function (name) {
+    ['core', 'ai', 'photo', 'collage', 'video', 'stt', 'music', 'auto', 'rig', 'avatar', 'pro', 'voice', 'main'].forEach(function (name) {
       var s = document.createElement('script');
       s.src = name + '.js' + bust; s.async = false;
       document.body.appendChild(s);

@@ -74,7 +74,9 @@ const P = {
   brushMode: 'doodle', brushColor: '#ff5d8f', brushSize: { doodle: 30, mosaic: 40, erase: 40, liquify: 45, retouch: 35, mask: 30, mark: 35 },
   cut: null, cutModel: 'Xenova/modnet', maskBrush: '', mark: null, wmMode: 'rect',
   hsl: {}, hslBand: 'red', fx: { type: 'none', amt: 60 }, zoom: 1,
-  liqOn: false, liqStrength: 50, compare: false, autoObj: true, markPts: null
+  liqOn: false, liqStrength: 50, compare: false, autoObj: true, markPts: null,
+  shape: { eye: 0, slim: 0, nose: 0, smile: 0, chin: 0 }, makeup: { lip: 0, lipColor: '#c46a6a', blush: 0, blushColor: '#f29b9b', shadow: 0, shadowColor: '#9c6b5a', preset: 'none' },
+  sky: null, tints: [], tintSel: -1, tintPart: '', tintColor: '#6b3e26', idSpec: 'tw2', idBg: '#ffffff', idSrc: null, body: null, restore: null
 };
 function resetAdj() { for (const [k] of ADJ) P.adj[k] = 0; }
 resetAdj();
@@ -85,7 +87,8 @@ function snapshot() {
     base: P.base, paint: P.paint, objects: P.objects.map(o => ({ ...o })),
     adj: { ...P.adj }, preset: P.preset, presetAmt: P.presetAmt, beauty: { ...P.beauty }, frame: { ...P.frame },
     cut: P.cut ? { ...P.cut, bg: { ...P.cut.bg } } : null,
-    hsl: JSON.parse(JSON.stringify(P.hsl)), fx: { ...P.fx }
+    hsl: JSON.parse(JSON.stringify(P.hsl)), fx: { ...P.fx },
+    shape: { ...P.shape }, makeup: { ...P.makeup }, sky: P.sky ? { ...P.sky } : null, tints: P.tints.map(t => ({ ...t }))
   };
 }
 function restore(s) {
@@ -93,6 +96,7 @@ function restore(s) {
   P.adj = { ...s.adj }; P.preset = s.preset; P.presetAmt = s.presetAmt; P.beauty = { ...s.beauty }; P.frame = { ...s.frame };
   P.cut = s.cut ? { ...s.cut, bg: { ...s.cut.bg } } : null; P.mark = null;
   P.hsl = JSON.parse(JSON.stringify(s.hsl || {})); P.fx = { ...(s.fx || { type: 'none', amt: 60 }) };
+  if (s.shape) { P.shape = { ...s.shape }; P.makeup = { ...s.makeup }; P.sky = s.sky ? { ...s.sky } : null; P.tints = s.tints.map(t => ({ ...t })); P.tintSel = Math.min(P.tintSel, P.tints.length - 1); }
   P.sel = null; P.crop = { x: 0, y: 0, w: 1, h: 1 };
   showTool(P.tool);
   requestRender();
@@ -138,6 +142,8 @@ function setPhotoImage(src) {
   P.crop = { x: 0, y: 0, w: 1, h: 1 };
   P.cut = null; P.mark = null; P.maskBrush = '';
   P.link = null;   // 從剪輯送來的照片會在 setPhotoImage 之後再設定連結
+  P.shape = { eye: 0, slim: 0, nose: 0, smile: 0, chin: 0 }; P.makeup = { ...P.makeup, lip: 0, blush: 0, shadow: 0, preset: 'none' };
+  P.sky = null; P.tints = []; P.tintSel = -1; P.idSrc = null; P.body = null; P.restore = null;
   P.hsl = {}; P.hslBand = ''; P.hslPick = false; P.fx = { type: 'none', amt: 60 }; P.zoom = 1;   // hslBand 留空：開新照片時自動選佔最多的顏色
   P.hist = []; P.redo = [];
   syncHistButtons();
@@ -454,7 +460,7 @@ function shiftedMask(c, iw, ih) {
   c._shifted = { mask: c.mask, iw, ih, shift: c.shift, cv };
   return cv;
 }
-async function runCutout() {
+async function runCutout(opt) {
   const base = P.base;
   try {
     const mask = await aiMatte(base, P.cutModel);
@@ -462,8 +468,9 @@ async function runCutout() {
     pushHistory();
     const old = P.cut && P.cut.bg;
     P.cut = { mask, feather: 0.5, shift: 0, dx: 0, dy: 0, scale: 1, bg: old ? { ...old } : { type: 'transparent', color: '#ffffff', color2: '#62d2c6', img: null, blur: 50 } };
+    if (opt && opt.portrait) { P.cut.bg.type = 'blur'; P.cut.bg.blur = 45; P.cut.feather = 1.5; }
     showTool('cutout'); requestRender();
-    toast('去背完成，可以在右邊換背景');
+    toast(opt && opt.portrait ? '人像模式完成，可以在右邊調整模糊程度' : '去背完成，可以在右邊換背景');
   } catch (e) { aiErrorToast(e); }
 }
 // 在指定的角落標出一塊常見的浮水印位置（寬 30%、高 12%）
@@ -661,6 +668,7 @@ function renderPhoto(target, maxSide, opts) {
   wx.imageSmoothingQuality = 'high';
   wx.drawImage(P.base, 0, 0, iw, ih);
   if (!opts.raw) {
+    if (typeof proPass === 'function') { wc = proPass(wc, s); wx = wc.getContext('2d'); }
     beautyPass(wc);
     if (P.adj.denoise) denoisePass(wc, P.adj.denoise / 100);
     const st1 = presetStage(P.preset, P.presetAmt / 100), st2 = userStage();
@@ -753,6 +761,8 @@ function transformAll(nw, nh, draw, mapPoint, rotDelta) {
     P.cut.dx = b[0] - a[0]; P.cut.dy = b[1] - a[1];
   }
   P.mark = null;
+  if (P.sky) P.sky = { ...P.sky, mask: apply(P.sky.mask) };
+  P.tints = P.tints.map(t => ({ ...t, mask: apply(t.mask) }));
   for (const o of P.objects) { const p = mapPoint(o.x, o.y); o.x = p[0]; o.y = p[1]; o.rot += rotDelta || 0; }
   P.crop = { x: 0, y: 0, w: 1, h: 1 };
   syncCropBox();
@@ -1066,6 +1076,7 @@ PV.addEventListener('pointerdown', e => {
     drag = { type: 'cut', x: p.x, y: p.y, dx: P.cut.dx || 0, dy: P.cut.dy || 0, moved: false };
     return;
   }
+  if (typeof proPointer === 'function' && proPointer(p)) return;
   const o = hitObject(p);
   if (o) {
     drag = { type: 'obj', o, dx: p.x - o.x, dy: p.y - o.y, moved: false };
@@ -1372,7 +1383,7 @@ const PANELS = {
     chips(el, [['tl', '左上角'], ['tr', '右上角'], ['bl', '左下角'], ['br', '右下角']], '', markCorner);
     el.append(h('button', { class: 'btn primary wide', text: '去除標記的地方', onclick: runRemove }));
     el.append(h('button', { class: 'btn wide', text: '重新標記（清掉紅色）', onclick: () => { P.mark = null; requestRender(); } }));
-    el.append(h('p', { text: '標記要把整個浮水印蓋住、稍微大一點沒關係。第一次使用要下載約 93MB 的 AI 模型，每次處理大約半分鐘。蓋滿整張圖的重複浮水印效果不好。' }));
+    el.append(h('p', { text: '標記要把整個浮水印蓋住、稍微大一點沒關係。第一次使用要下載約 70MB 的 AI 模型，每次處理大約半分鐘。蓋滿整張圖的重複浮水印效果不好。' }));
     el.append(h('p', { text: '請只用在你自己的照片，或你有權使用的圖片上。' }));
   },
   remove(el) {
@@ -1383,7 +1394,7 @@ const PANELS = {
     slider(el, { label: '筆刷大小', min: 1, max: 100, value: P.brushSize.mark, onInput: v => { P.brushSize.mark = v; } });
     el.append(h('button', { class: 'btn primary wide', text: '清除塗紅的地方', onclick: runRemove }));
     el.append(h('button', { class: 'btn wide', text: '重新塗（清掉紅色標記）', onclick: () => { P.mark = null; requestRender(); } }));
-    el.append(h('p', { text: '第一次使用要下載約 110MB 的 AI 模型；每次清除大約需要半分鐘。一次清一樣東西，結果會比一次清很多樣好。電線、文字這類細長的東西，可以把「自動選取」關掉自己塗。' }));
+    el.append(h('p', { text: '第一次使用要下載約 80MB 的 AI 模型；每次清除大約需要半分鐘。一次清一樣東西，結果會比一次清很多樣好。電線、文字這類細長的東西，可以把「自動選取」關掉自己塗。' }));
   },
   crop(el) {
     const root = el;
@@ -1531,6 +1542,7 @@ function showTool(tool) {
   if (tool !== 'beauty') P.liqOn = false;
   if (tool !== 'cutout') P.maskBrush = '';
   $$('#photoTools button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.tool === tool)));
+  { const b = $('#photoTools [data-tool="' + tool + '"]'); if (b && MODE === 'photo') b.scrollIntoView({ block: 'nearest', inline: 'nearest' }); }   // 手機上工具列可以左右滑：選到的那個要看得到
   const el = $('#photoPanel');
   el.replaceChildren();
   if (P.base) PANELS[tool](el);

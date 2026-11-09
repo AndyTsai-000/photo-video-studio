@@ -102,6 +102,7 @@ function openExportDialog() {
       card.append(h('h3', { text: '內容' }));
       chips(card, [['off', '只有成品'], ['on', '前後對比圖']], PHOTO_CMP.on ? 'on' : 'off', v => { PHOTO_CMP.on = v === 'on'; openExportDialog(); });
       if (PHOTO_CMP.on) card.append(h('p', { text: '修圖前和修圖後會並排成一張圖，適合分享修圖成果。' }));
+      card.append(h('button', { class: 'btn wide', text: '一次修很多張（把同樣的修圖套到其他照片）', onclick: () => { closeExportDialog(); batchExport(); } }));
     } else {
       pick('side', [['2400', '標準 2400'], ['3600', '高 3600'], ['4800', '超高 4800']]);
       const k = +e.side / COLLAGE_SIDE, [w, hh] = collageSize().map(v => Math.round(v * k));
