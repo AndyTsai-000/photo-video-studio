@@ -198,10 +198,32 @@ function showDoneBar() {
 $('#doneClose').addEventListener('click', hideDoneBar);
 $('#dlg').addEventListener('pointerdown', e => { if (e.target.id === 'dlg') closeExportDialog(); });
 
-$$('.modes button').forEach(b => b.addEventListener('click', () => setMode(b.dataset.mode)));
+// 從首頁進修圖、拼圖、手動剪輯時，如果上次的作品還在，先問要接著做還是開新的
+const WORK_NAME = { photo: '修圖', collage: '拼圖', video: '剪輯' };
+function hasWork(mode) {
+  return mode === 'photo' ? !!P.base : mode === 'collage' ? C.imgs.length > 0 : mode === 'video' ? V.clips.length > 0 : false;
+}
+function freshStart(mode) {
+  if (mode === 'photo') { P.base = null; P.paint = null; P.objects = []; P.sel = null; P.link = null; P.hist = []; P.redo = []; syncPhotoEmpty(); }
+  else if (mode === 'collage') { C.imgs = []; C.sel = -1; C.layout = 0; collagePanel(); drawCollage(); }
+  else if (mode === 'video') newVideoProject();
+}
+function enterMode(mode) {
+  if (MODE !== 'home' || !hasWork(mode)) { setMode(mode); return; }
+  const card = $('#dlgCard'), go = fresh => { $('#dlg').hidden = true; if (fresh) freshStart(mode); setMode(mode); };
+  card.style.maxWidth = '';
+  card.replaceChildren(
+    h('h2', { text: '上次的' + WORK_NAME[mode] + '還在' }),
+    h('p', { text: '要接著做，還是開始一個新的？開新的會把上次的' + WORK_NAME[mode] + '清掉，還沒匯出的話請先選「接著做」匯出。' }),
+    h('div', { class: 'actions' },
+      h('button', { class: 'btn', text: '接著做', onclick: () => go(false) }),
+      h('button', { class: 'btn primary', text: '開新的', onclick: () => go(true) })));
+  $('#dlg').hidden = false;
+}
+$$('.modes button').forEach(b => b.addEventListener('click', () => enterMode(b.dataset.mode)));
 $('#homeBtn').addEventListener('click', () => setMode('home'));
 $$('.panel-toggle').forEach(b => b.addEventListener('click', () => { const m = b.closest('.mode').id; setPanelOff(m, !PANEL_OFF[m]); }));
-$$('.home-card').forEach(b => b.addEventListener('click', () => setMode(b.dataset.go)));
+$$('.home-card').forEach(b => b.addEventListener('click', () => enterMode(b.dataset.go)));
 function drawHomePreviews() {
   const cover = (id, src) => {
     const c = $(id), s = Math.max(c.width / src.width, c.height / src.height);
