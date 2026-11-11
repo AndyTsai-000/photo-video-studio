@@ -9,10 +9,20 @@ const AUTO_STYLES = [
   ['clean', '簡潔', '不加濾鏡和轉場，只把素材乾淨地接起來', { d: [2.5, 3], trans: ['none'], filter: 'none', kb: 'none', vig: 0, anim: 'none' }]
 ];
 const AU = {
-  items: [], style: 'vlog', aspect: '9:16', length: 'auto', order: 'added',
+  items: [], style: 'vlog', trans: 'style', aspect: '9:16', length: 'auto', order: 'added',
   music: null, musicMeta: null, beat: true, title: '', ending: '', audio: 'low', captions: true, busy: false
 };
 
+// 轉場：跟著風格、全部同一種、或每段隨機換（不會連續兩段一樣）
+const AUTO_TRANS = [['style', '跟著風格'], ['none', '不要轉場'], ['fade', '淡化'], ['slide', '滑入'], ['push', '推移'], ['zoom', '放大'], ['wipe', '擦除'], ['mix', '每段隨機']];
+function autoTransFor(i, st, prev) {
+  if (!i) return 'none';
+  if (AU.trans === 'style') return st.trans[(i - 1) % st.trans.length];
+  if (AU.trans !== 'mix') return AU.trans;
+  const pool = ['fade', 'slide', 'push', 'zoom', 'wipe'].filter(t => t !== prev);
+  return pool[Math.floor(Math.random() * pool.length)];
+}
+try { const t = localStorage.getItem('autoTrans'); if (t && AUTO_TRANS.some(x => x[0] === t)) AU.trans = t; } catch (e) { /* 略過 */ }
 function addAutoFiles(files) {
   let skipped = 0;
   for (const f of files) {
@@ -144,7 +154,7 @@ async function runAutoEdit() {
     const [ra, rb] = V_ASPECTS[AU.aspect];
     out.forEach((c, i) => {
       c.filter = st.filter; c.vig = st.vig;
-      c.trans = i ? st.trans[(i - 1) % st.trans.length] : 'none';
+      c.trans = autoTransFor(i, st, i ? out[i - 1].trans : 'none');
       c.kb = st.kb === 'alt' ? (i % 2 ? 'out' : 'in') : st.kb;
       // 直式素材放進橫式畫面（或反過來）時用模糊背景補滿，不要把主體裁掉一大半
       const sw = c.kind === 'video' ? c.el.videoWidth : c.el.width, sh = c.kind === 'video' ? c.el.videoHeight : c.el.height;
@@ -248,6 +258,9 @@ function autoPanel() {
   c.append(h('div', { class: 'auto-styles' }, AUTO_STYLES.map(([key, name, desc]) => h('button', {
     class: 'auto-style', 'aria-pressed': String(AU.style === key), onclick: () => { AU.style = key; autoPanel(); }
   }, h('strong', { text: name }), h('span', { text: desc })))));
+  c.append(h('h3', { text: '轉場' }));
+  chips(c, AUTO_TRANS, AU.trans, v => { AU.trans = v; try { localStorage.setItem('autoTrans', v); } catch (e) { /* 略過 */ } });
+  c.append(h('p', { class: 'hint', text: '「跟著風格」會用上面風格搭配好的轉場。剪好後也可以在手動剪輯裡點片段，個別再改。' }));
 
   c = card('3　畫面比例與長度');
   c.append(h('h3', { text: '比例' }));
