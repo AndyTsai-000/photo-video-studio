@@ -169,6 +169,7 @@ async function runAutoEdit() {
     STT.auto = sttWas;
     aiStatus(null);
     setMode('video');
+    AU.made = true;   // 匯出後可以「換風格重剪」
     setVideoSize(); rebuildTL(); vPanel(); seek(0);
     vCommit();
     if (AU.captions) {

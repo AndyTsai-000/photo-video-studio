@@ -1284,6 +1284,7 @@ function newVideoProject() {
   if (V.music) V.music.el.pause();
   for (const v of V.voices) v.el.pause();
   V.clips = []; V.texts = []; V.music = null; V.voices = []; V.sel = V.selText = V.selVoice = null; V.t = 0;
+  if (typeof AU !== 'undefined') AU.made = false;
   VH.undo = []; VH.redo = []; VH.last = null; VH.key = '';
   rebuildTL(); vPanel(); seek(0); vCommit();
 }

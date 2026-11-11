@@ -157,19 +157,43 @@ const NEXT_WORK = {
   }],
   avatar: ['換照片再做一支', async () => { const [f] = await pickFiles($('#fileImg')); if (f) setAvatarPhoto(f); }]
 };
-let doneTimer = 0;
-function hideDoneBar() { clearTimeout(doneTimer); $('#doneBar').hidden = true; }
+let doneTimer = 0, doneWait = null;
+function hideDoneBar() { clearTimeout(doneTimer); if (doneWait) { doneWait.disconnect(); doneWait = null; } $('#doneBar').hidden = true; }
+// 剛匯出的檔案可以直接分享（傳 LINE、IG 等）：這時是使用者按按鈕，系統允許叫出分享選單
+function shareLast() {
+  const o = window.LAST_OUT;
+  if (!o) return false;
+  const file = new File([o.blob], o.name, { type: o.blob.type });
+  try { if (!(navigator.share && navigator.canShare && navigator.canShare({ files: [file] }))) return false; } catch (e) { return false; }
+  return file;
+}
 function showDoneBar() {
   const mode = MODE, next = NEXT_WORK[mode];
   if (!next) return;
-  const box = $('#doneActions');
-  box.replaceChildren(
-    h('button', { class: 'btn primary', text: next[0], onclick: () => { hideDoneBar(); next[1](); } }),
-    h('button', { class: 'btn', text: '繼續修改', title: '留在這件作品，繼續編輯', onclick: hideDoneBar }),
-    h('button', { class: 'btn ghost', text: '回首頁', onclick: () => setMode('home') }));
+  // 手機上匯出後會先跳出「存到相簿」的視窗：等那個視窗關掉再顯示，才不會被蓋住、時間到就消失
+  if (!$('#dlg').hidden) {
+    if (doneWait) doneWait.disconnect();
+    doneWait = new MutationObserver(() => { if ($('#dlg').hidden) { doneWait.disconnect(); doneWait = null; if (MODE === mode) showDoneBar(); } });
+    doneWait.observe($('#dlg'), { attributes: true, attributeFilter: ['hidden'] });
+    return;
+  }
+  const o = window.LAST_OUT, isVideo = o && o.blob.type.startsWith('video/'), btns = [];
+  const btn = (cls, text, fn, title) => btns.push(h('button', { class: 'btn ' + cls, text, title: title || '', onclick: () => { hideDoneBar(); fn(); } }));
+  $('#doneText').textContent = isVideo ? '影片已匯出！' : o && o.blob.type === 'image/gif' ? 'GIF 動圖已匯出！' : '作品已匯出！';
+  btn('primary', next[0], next[1]);
+  if (mode === 'video') {
+    if (typeof AU !== 'undefined' && AU.made && AU.items.length) btn('', '換個風格重剪', () => { setMode('auto'); toast('素材都還在，選好新的風格，再按「開始智能剪輯」', 5000); }, '用同樣的素材，換風格、比例或配樂再剪一支');
+    if (isVideo) btn('', '另存 GIF 動圖', () => { const was = EXP.video.fmt; EXP.video.fmt = 'gif'; exportVideo(); EXP.video.fmt = was; }, '把影片前 15 秒做成會動的圖片');
+    if (V.texts.some(t => t.auto) && isVideo) btn('', '匯出字幕檔', exportSrt, 'SRT 字幕檔，可以上傳到 YouTube');
+  }
+  if (mode === 'photo') btn('', '拿去拼圖', () => { const c = mk(4, 4); renderPhoto(c, 0, { final: true }); C.imgs = [{ cv: c, ox: 0.5, oy: 0.5, zoom: 1 }]; C.sel = -1; C.layout = 0; setMode('collage'); collagePanel(); drawCollage(); toast('再加幾張照片就能拼成一張'); }, '把修好的照片放進拼圖');
+  if (shareLast()) btn('', '分享', async () => { try { await navigator.share({ files: [shareLast()] }); } catch (e) { /* 取消 */ } }, '傳到 LINE、Instagram 等 App');
+  btn('', '繼續修改', () => {}, '留在這件作品，繼續編輯');
+  btn('ghost', '回首頁', () => setMode('home'));
+  $('#doneActions').replaceChildren(...btns);
   $('#doneBar').hidden = false;
   clearTimeout(doneTimer);
-  doneTimer = setTimeout(hideDoneBar, 25000);
+  doneTimer = setTimeout(hideDoneBar, 60000);
 }
 $('#doneClose').addEventListener('click', hideDoneBar);
 $('#dlg').addEventListener('pointerdown', e => { if (e.target.id === 'dlg') closeExportDialog(); });
