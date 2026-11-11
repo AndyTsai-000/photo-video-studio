@@ -267,6 +267,10 @@ function tick(now) {
   if (V.active !== c) activate(c, L.local);
   if (c.kind === 'video') {
     const v = c.el;
+    if (v.paused && !v.ended && v.currentTime < c.out - 0.02 && now - (V.retryAt || 0) > 500) {
+      V.retryAt = now;
+      v.play().catch(err => { if (err && err.name === 'NotAllowedError' && V.playing) askTapToPlay(v); });
+    }
     if (!v.seeking && v.readyState >= 2) {
       if (v.currentTime >= c.out - 0.02 || v.ended) V.t = L.start + clipDur(c) + 0.0005;
       else V.t = Math.max(V.t, L.start + Math.max(0, (v.currentTime - c.in) / c.speed));
@@ -283,7 +287,14 @@ function tick(now) {
   if (V.gif && gifGrab()) return;
   requestAnimationFrame(tick);
 }
+function askTapToPlay(v) {
+  if ($('#tapPlay')) return;
+  const b = h('button', { id: 'tapPlay', class: 'btn primary', text: '影片被手機暫停了，點這裡繼續', style: 'position:fixed;left:50%;bottom:30%;transform:translateX(-50%);z-index:1000' });
+  b.onclick = () => { b.remove(); unlockMedia(); v.play().catch(() => {}); };
+  document.body.append(b);
+}
 function finishPlayback(total) {
+  { const b = $('#tapPlay'); if (b) b.remove(); }
   V.t = total;
   pause();
   drawFrame(); updatePlayhead();
@@ -513,36 +524,65 @@ function addFreezeFrame() {
     rebuildTL(); vPanel(); seek(V.t);
     vCommit();
   };
+  // 手機：手指按住片段不動約 0.35 秒就進入拖曳；直接滑動則照常左右捲動時間軸
+  let hold = null;
+  const startDrag = () => {
+    drag.active = true;
+    pause();
+    inner.classList.add('reordering');
+    $('#tlDrop').hidden = false;
+    const el = $('[data-clip="' + drag.id + '"]', inner);
+    if (el) el.classList.add('dragging');
+    if (navigator.vibrate) try { navigator.vibrate(15); } catch (e) { /* 略過 */ }
+  };
+  inner.addEventListener('touchmove', e => { if (drag && (drag.active || drag.touch)) e.preventDefault(); }, { passive: false });
+  inner.addEventListener('contextmenu', e => { if (e.target.closest('[data-clip]')) e.preventDefault(); });
   inner.addEventListener('pointerdown', e => {
+    clearTimeout(hold);
     const clipEl = e.target.closest('[data-clip]'), textEl = e.target.closest('[data-text]'), voiceEl = e.target.closest('[data-voice]');
     const sel = clipEl ? +clipEl.dataset.clip : null, selText = textEl ? +textEl.dataset.text : null, selVoice = voiceEl ? +voiceEl.dataset.voice : null;
     if ((clipEl || textEl || voiceEl) && (V.sel !== sel || V.selText !== selText || V.selVoice !== selVoice)) {
       V.sel = sel; V.selText = selText; V.selVoice = selVoice;
       rebuildTL(); vPanel();
     }
-    inner.setPointerCapture(e.pointerId);
     seek(at(e));
+    if (clipEl && e.pointerType === 'touch') {
+      // 觸控：先不抓住手指，讓瀏覽器可以捲動；按住不動才開始拖曳
+      drag = { id: sel, x0: e.clientX, y0: e.clientY, active: false, to: -1, touch: false, pid: e.pointerId };
+      const d = drag;
+      hold = setTimeout(() => {
+        if (drag !== d) return;
+        d.touch = true;
+        try { inner.setPointerCapture(d.pid); } catch (err) { /* 略過 */ }
+        startDrag(); d.to = dropIndex({ clientX: d.x0 });
+      }, 350);
+      return;
+    }
+    try { inner.setPointerCapture(e.pointerId); } catch (err) { /* 略過 */ }
     // 按在片段上：可能是要拖曳換順序，先記下來，移動超過一小段才算；按在別處則是拖曳播放頭
-    if (clipEl && e.pointerType !== 'touch') drag = { id: sel, x0: e.clientX, active: false, to: -1 };
+    if (clipEl) drag = { id: sel, x0: e.clientX, active: false, to: -1 };
     else scrubbing = true;
   });
   inner.addEventListener('pointermove', e => {
     if (drag) {
-      if (!drag.active && Math.abs(e.clientX - drag.x0) > 8) {
-        drag.active = true;
-        pause();
-        inner.classList.add('reordering');
-        $('#tlDrop').hidden = false;
-        const el = $('[data-clip="' + drag.id + '"]', inner);
-        if (el) el.classList.add('dragging');
+      if (drag.pid !== undefined && !drag.active) {
+        // 觸控還沒按滿時間就移動了：當成捲動時間軸
+        if (Math.hypot(e.clientX - drag.x0, e.clientY - drag.y0) > 10) { clearTimeout(hold); drag = null; }
+        return;
       }
-      if (drag.active) drag.to = dropIndex(e);
+      if (!drag.active && Math.abs(e.clientX - drag.x0) > 8) startDrag();
+      if (drag.active) {
+        drag.to = dropIndex(e);
+        // 拖到時間軸左右邊緣時自動捲動，長的專案也能拖到很後面
+        const sc = $('#tlScroll'), r = sc.getBoundingClientRect();
+        if (e.clientX > r.right - 40) sc.scrollLeft += 12; else if (e.clientX < r.left + 40) sc.scrollLeft -= 12;
+      }
       return;
     }
     if (scrubbing) seek(at(e));
   });
-  inner.addEventListener('pointerup', () => endDrag(true));
-  inner.addEventListener('pointercancel', () => endDrag(false));
+  inner.addEventListener('pointerup', () => { clearTimeout(hold); endDrag(true); });
+  inner.addEventListener('pointercancel', () => { clearTimeout(hold); endDrag(false); });
   $('#zoomRange').addEventListener('input', e => { V.pps = +e.target.value; rebuildTL(); });
   $('#playBtn').addEventListener('click', () => (V.playing ? pause() : play()));
 
@@ -883,6 +923,8 @@ function endExportUi() {
   $('#exportOverlay').hidden = true;
   $('#exportTitle').textContent = '正在匯出影片';
   V.exporting = false; V.rec = null; V.enc = null; V.gif = null; V.res = 720; setVideoSize();
+  keepAwake(false);
+  if (V.hiddenDuringExport) { V.hiddenDuringExport = false; setTimeout(() => toast('匯出途中離開過這個畫面，影片裡可能有幾秒停格。最好讓畫面一直開著匯出。', 7000), 1500); }
   if (V.audio) V.audio.master.gain.value = 1;
 }
 function closeEncoder(E) {
@@ -933,10 +975,44 @@ function exportWithRecorder(fps) {
   V.rec = rec;
   setTimeout(() => { if (V.exporting && V.rec === rec) { rec.start(1000); play(); } }, 500);
 }
+// 手機瀏覽器規定：有聲音的影片要在使用者點按的當下播放過一次，之後才能由程式自己播放。
+// 匯出要先準備編碼器、等半秒才開始播，那時已經不算點按了，影片會播不動、匯出卡住。
+// 所以在按下「開始匯出」的當下，把每段影片和聲音都靜音播一下再停住。
+function unlockMedia() {
+  ensureAudio();
+  if (!V.audio) return;
+  const els = [...V.clips.filter(c => c.kind === 'video').map(c => c.el), ...audioItems().map(a => a.el)];
+  const g = V.audio.master.gain; g.value = 0;
+  for (const el of new Set(els)) {
+    setGain(el, 1);   // 先接上音量節點，聲音才會經過已經靜音的總音量
+    try { const p = el.play(); if (p) p.then(() => { if (!inUse(el)) el.pause(); }, () => {}); } catch (e) { /* 略過 */ }
+  }
+  setTimeout(() => { for (const el of els) if (!inUse(el) && !el.paused) el.pause(); if (!V.gif) g.value = 1; }, 250);
+}
+function inUse(el) {
+  return V.playing && ((V.active && V.active.el === el) || audioItems().some(a => a.el === el));
+}
+// 匯出時不讓手機螢幕自動關掉（螢幕一關，畫面停住，匯出就停了）
+async function keepAwake(on) {
+  try {
+    if (on && navigator.wakeLock && !V.wake) V.wake = await navigator.wakeLock.request('screen');
+    else if (!on && V.wake) { V.wake.release(); V.wake = null; }
+  } catch (e) { V.wake = null; }
+}
+document.addEventListener('visibilitychange', () => {
+  if (!V.exporting) return;
+  if (document.hidden) { V.hiddenDuringExport = true; return; }
+  keepAwake(true);
+  // 切到別的 App 回來：播放被系統停了，接著播下去
+  if (V.playing && V.active && V.active.kind === 'video' && V.active.el.paused) V.active.el.play().catch(() => {});
+});
 async function exportVideo() {
   if (V.exporting) return;
   if (totalDur() <= 0) { toast('先加入影片或圖片'); return; }
   pause();
+  unlockMedia();
+  keepAwake(true);
+  V.hiddenDuringExport = false;
   if (EXP.video.fmt === 'gif') { exportGif(); return; }
   const fps = +EXP.video.fps;
   V.res = +EXP.video.res;
@@ -974,6 +1050,7 @@ function gifDims() {
   return [Math.round(a * s / 2) * 2, Math.round(b * s / 2) * 2];
 }
 function exportGif() {
+  keepAwake(true);
   const [w, hh] = gifDims();
   V.res = 720; setVideoSize();
   ensureAudio();

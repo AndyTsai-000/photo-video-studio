@@ -272,7 +272,7 @@ input[type="color"] { width: 34px; height: 28px; padding: 0; border: 1px solid v
 .music-list.lib { max-height: 22vh; min-height: 0; }
 .mbar { background: #6b5bd6; color: var(--fg); line-height: 18px; left: 0; }
 .tl-drop { position: absolute; top: 20px; bottom: 0; left: 0; width: 4px; border-radius: 2px; background: var(--cool); pointer-events: none; z-index: 2; }
-.t-clips .clip { cursor: grab; }
+.t-clips .clip { cursor: grab; -webkit-touch-callout: none; -webkit-user-select: none; }
 .reordering, .reordering .clip { cursor: grabbing; }
 .clip.dragging { opacity: .45; }
 .playhead { position: absolute; top: 0; bottom: 0; left: 0; width: 2px; background: var(--accent); pointer-events: none; }
