@@ -168,7 +168,7 @@ CV2.addEventListener('pointerdown', e => {
   if (C.sel !== hit.i) { C.sel = hit.i; collagePanel(); }
   drawCollage();
   if (hit.i < 0) return;
-  CV2.setPointerCapture(e.pointerId);
+  try { CV2.setPointerCapture(e.pointerId); } catch (err) { /* 略過 */ }
   const it = C.imgs[hit.i];
   cDrag = { ...hit, x: e.clientX, y: e.clientY, it, ox0: it.ox, oy0: it.oy, target: -1 };
   CV2.style.cursor = 'grabbing';

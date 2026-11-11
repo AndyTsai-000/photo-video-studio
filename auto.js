@@ -177,6 +177,50 @@ async function runAutoEdit() {
   autoPanel();
 }
 
+// 素材縮圖可以拖曳換順序：滑鼠直接拖；手指按住約 0.3 秒再拖（直接滑動是捲動頁面）
+function sortableThumbs(grid, list, done) {
+  let d = null, hold = null;
+  const start = () => {
+    d.on = true; d.el.classList.add('dragging'); grid.classList.add('sorting');
+    try { grid.setPointerCapture(d.pid); } catch (e) { /* 略過 */ }
+    if (navigator.vibrate) try { navigator.vibrate(15); } catch (e) { /* 略過 */ }
+  };
+  const end = apply => {
+    clearTimeout(hold);
+    if (!d) return;
+    const x = d; d = null;
+    x.el.classList.remove('dragging'); grid.classList.remove('sorting');
+    if (!x.on) return;
+    const to = [...grid.children].indexOf(x.el);
+    if (apply && to >= 0 && to !== x.from) { const [it] = list.splice(x.from, 1); list.splice(to, 0, it); }
+    done(apply && to !== x.from);
+  };
+  grid.addEventListener('touchmove', e => { if (d && d.on) e.preventDefault(); }, { passive: false });
+  grid.addEventListener('contextmenu', e => e.preventDefault());
+  grid.addEventListener('dragstart', e => e.preventDefault());
+  grid.addEventListener('pointerdown', e => {
+    const el = e.target.closest('.auto-thumb');
+    if (!el || e.target.closest('button') || (e.pointerType === 'mouse' && e.button !== 0)) return;
+    d = { el, from: [...grid.children].indexOf(el), x0: e.clientX, y0: e.clientY, pid: e.pointerId, on: false, touch: e.pointerType !== 'mouse' };
+    if (d.touch) { const me = d; hold = setTimeout(() => { if (d === me) start(); }, 300); }
+  });
+  grid.addEventListener('pointermove', e => {
+    if (!d) return;
+    const moved = Math.hypot(e.clientX - d.x0, e.clientY - d.y0);
+    if (!d.on) {
+      if (d.touch) { if (moved > 10) { clearTimeout(hold); d = null; } return; }
+      if (moved < 6) return;
+      start();
+    }
+    const over = document.elementFromPoint(e.clientX, e.clientY), t = over && over.closest('.auto-thumb');
+    if (t && t !== d.el && t.parentElement === grid) {
+      const kids = [...grid.children];
+      if (kids.indexOf(t) > kids.indexOf(d.el)) t.after(d.el); else t.before(d.el);
+    }
+  });
+  grid.addEventListener('pointerup', () => end(true));
+  grid.addEventListener('pointercancel', () => end(false));
+}
 function autoPanel() {
   const el = $('#autoInner');
   if (!el) return;
@@ -184,13 +228,19 @@ function autoPanel() {
   const card = (title, hint) => { const c = h('section', { class: 'auto-card' }, h('h2', { text: title }), hint ? h('p', { text: hint }) : null); el.append(c); return c; };
   el.append(h('h1', { text: 'AI 智能剪輯' }), h('p', { class: 'home-lead', text: '放進照片或影片，選好風格和比例，程式會自動挑片段、排順序、加轉場和配樂，剪成一支影片。' }));
 
-  let c = card('1　素材', AU.items.length ? '已加入 ' + AU.items.length + ' 個。會照下面設定的順序排列。' : '照片、影片都可以，可以一次選很多個，也可以直接拖進來。');
+  let c = card('1　素材', AU.items.length ? '已加入 ' + AU.items.length + ' 個。' + (AU.items.length > 1 ? '按住縮圖拖曳可以換順序。' : '') : '照片、影片都可以，可以一次選很多個，也可以直接拖進來。');
   if (AU.items.length) {
-    c.append(h('div', { class: 'auto-thumbs' }, AU.items.map((it, i) => {
-      const media = it.kind === 'image' ? h('img', { src: it.url, alt: '' }) : h('video', { src: it.url + '#t=0.3', muted: true, preload: 'metadata', playsinline: true });
+    const grid = h('div', { class: 'auto-thumbs' }, AU.items.map((it, i) => {
+      const media = it.kind === 'image' ? h('img', { src: it.url, alt: '', draggable: 'false' }) : h('video', { src: it.url + '#t=0.3', muted: true, preload: 'metadata', playsinline: true });
       return h('div', { class: 'auto-thumb', title: it.file.name }, media, it.kind === 'video' ? h('span', { text: '影片' }) : null,
         h('button', { 'aria-label': '移除 ' + it.file.name, text: '×', onclick: () => { URL.revokeObjectURL(it.url); AU.items.splice(i, 1); autoPanel(); } }));
-    })));
+    }));
+    c.append(grid);
+    sortableThumbs(grid, AU.items, changed => {
+      // 自己排過順序，就照排好的順序剪
+      if (changed && AU.order !== 'added') { AU.order = 'added'; toast('已改成照你排的順序剪輯'); }
+      autoPanel();
+    });
   }
   c.append(h('button', { class: 'btn ' + (AU.items.length ? '' : 'primary ') + 'wide', text: AU.items.length ? '再加入照片或影片' : '加入照片或影片', onclick: async () => addAutoFiles(await pickFiles($('#fileMedia'))) }));
 
@@ -205,7 +255,7 @@ function autoPanel() {
   c.append(h('h3', { text: '影片長度' }));
   chips(c, [['auto', '自動（照素材數量）'], ['15', '約 15 秒'], ['30', '約 30 秒'], ['60', '約 60 秒']], AU.length, v => { AU.length = v; });
   c.append(h('h3', { text: '素材順序' }));
-  chips(c, [['added', '照加入的順序'], ['time', '照拍攝時間'], ['random', '隨機']], AU.order, v => { AU.order = v; });
+  chips(c, [['added', '照上面排的順序'], ['time', '照拍攝時間'], ['random', '隨機']], AU.order, v => { AU.order = v; });
 
   c = card('4　配樂與聲音', AU.music ? '配樂：' + ((AU.musicMeta && AU.musicMeta.title) || AU.music.name) : '不加也可以。加了配樂會自動在結尾淡出。');
   c.append(h('div', { class: 'chips' },
