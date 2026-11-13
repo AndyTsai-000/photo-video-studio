@@ -164,8 +164,8 @@ async function collageVideoItem(f) {
   const vw = v.videoWidth || 16, vh = v.videoHeight || 9, s = Math.min(1, 1280 / Math.max(vw, vh));
   const cv = mk(Math.round(vw * s), Math.round(vh * s));
   cv.getContext('2d').drawImage(v, 0, 0, cv.width, cv.height);
-  // 第一段影片預設有聲音，其他段靜音，免得好幾段聲音混在一起
-  return { cv, vid: v, sound: !collageHasVideo(), ox: 0.5, oy: 0.5, zoom: 1 };
+  // 拼圖裡的影片一律不出聲，只看畫面
+  return { cv, vid: v, ox: 0.5, oy: 0.5, zoom: 1 };
 }
 function dropCollageVideo(it) {
   if (!it || !it.vid) return;
@@ -296,14 +296,10 @@ function collagePanel() {
 
   el = root;
   const it = C.imgs[C.sel];
-  if (!it) el.append(h('p', { text: '按住照片拖到另一格，放開就會交換位置。在同一格裡拖曳，可以移動照片顯示的範圍。' + (collageHasVideo() ? '點影片那一格可以開關它的聲音。' : '') }));
+  if (!it) el.append(h('p', { text: '按住照片拖到另一格，放開就會交換位置。在同一格裡拖曳，可以移動照片顯示的範圍。' }));
   else {
     el = group(root, 'col.sel', '選取的' + (it.vid ? '影片' : '照片') + '（第 ' + (C.sel + 1) + ' 格）', true);
     slider(el, { label: '放大', min: 100, max: 300, value: Math.round(it.zoom * 100), def: 100, fmt: v => v + '%', onInput: v => { it.zoom = v / 100; drawCollage(); } });
-    if (it.vid) {
-      el.append(h('h3', { text: '聲音' }));
-      chips(el, [['on', '有聲音'], ['off', '靜音']], it.sound ? 'on' : 'off', v => { it.sound = v === 'on'; collagePanel(); });
-    }
     el.append(h('div', { class: 'chips' },
       h('button', {
         class: 'btn', text: '換一張', onclick: async () => {
@@ -313,7 +309,6 @@ function collagePanel() {
           try {
             const nu = f.type.startsWith('video/') ? await collageVideoItem(f) : { cv: await fileToCanvas(f, 2400), ox: 0.5, oy: 0.5, zoom: 1 };
             if (nu.vid && !it.vid && C.imgs.filter(x => x.vid).length >= COLLAGE_VIDEO_MAX) { dropCollageVideo(nu); toast('一張拼圖最多放 ' + COLLAGE_VIDEO_MAX + ' 段影片'); return; }
-            if (nu.vid) nu.sound = it.vid ? it.sound : !collageHasVideo();
             dropCollageVideo(it); C.imgs[sel] = nu; collagePanel(); drawCollage();
           } catch (e) { toast('無法讀取 ' + f.name); }
         }
@@ -349,14 +344,10 @@ async function exportCollageVideo() {
   if (V.exporting) return;
   const vids = C.imgs.filter(it => it.vid), dur = collageVideoDur(), [w, hh] = collageVideoSize();
   const [W0, H0] = collageSize(), k = Math.max(w / W0, hh / H0);
-  // 手機規定有聲音的影片要在按下按鈕的當下播過一次，之後程式才能播：先靜音播一下
+  // 拼圖影片不含聲音：影片全部靜音，錄音的總音量也關掉（編碼器還是需要一條聲音軌）
   ensureAudio();
   if (V.audio) V.audio.master.gain.value = 0;
-  for (const it of vids) {
-    it.vid.muted = !it.sound;
-    setGain(it.vid, it.sound ? 1 : 0);
-    try { const p = it.vid.play(); if (p) p.catch(() => {}); } catch (e) { /* 略過 */ }
-  }
+  for (const it of vids) it.vid.muted = true;
   C.exporting = true;
   V.exporting = true; V.cancelled = false; V.rec = null; V.enc = null;
   keepAwake(true);
@@ -379,8 +370,7 @@ async function exportCollageVideo() {
   else {
     if (!window.MediaRecorder || !out.captureStream) { finish(); endExportUi(); toast('這個瀏覽器不支援影片匯出，請改用 Chrome 或 Edge', 4000); return; }
     const stream = out.captureStream(fps);
-    if (V.audio) V.audio.dest.stream.getAudioTracks().forEach(t => stream.addTrack(t));
-    const mime = ['video/mp4;codecs=avc1.42E01E,mp4a.40.2', 'video/mp4', 'video/webm;codecs=vp9,opus', 'video/webm;codecs=vp8,opus', 'video/webm'].find(m => MediaRecorder.isTypeSupported(m));
+    const mime = ['video/mp4;codecs=avc1.42E01E', 'video/mp4', 'video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm'].find(m => MediaRecorder.isTypeSupported(m));
     try { rec = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: br }); }
     catch (e) { finish(); endExportUi(); toast('無法開始錄製：' + e.message, 4000); return; }
     const ext = mime && mime.startsWith('video/mp4') ? 'mp4' : 'webm';
@@ -394,7 +384,6 @@ async function exportCollageVideo() {
     };
     V.rec = rec;
   }
-  if (V.audio) V.audio.master.gain.value = 1;
   for (const it of vids) it.vid.play().catch(() => {});
   // 等每段影片都真的開始播再開始錄
   for (let i = 0; i < 40 && vids.some(it => it.vid.paused || it.vid.currentTime === 0); i++) await new Promise(r => setTimeout(r, 50));
