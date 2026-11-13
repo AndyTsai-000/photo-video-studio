@@ -54,7 +54,7 @@
         <button class="home-card" data-go="collage">
           <canvas id="homeCollage" width="480" height="300"></canvas>
           <strong>拼圖</strong>
-          <span>最多 15 張照片自動排版，可調比例、間距、圓角，拼完直接送去修圖</span>
+          <span>最多 15 張照片或影片自動排版，可調比例、間距、圓角；放了影片就拼成一支會動的影片</span>
         </button>
         <button class="home-card" data-go="video">
           <canvas id="homeVideo" width="480" height="300"></canvas>
@@ -124,8 +124,8 @@
         <div class="canvas-wrap"><canvas id="cv2"></canvas></div>
         <div class="empty" id="collageEmpty" hidden>
           <strong>還沒有圖片</strong>
-          <span>加入 2 到 15 張照片就能開始拼圖，也可以直接把照片拖進來。</span>
-          <button class="btn primary" id="collageEmptyBtn">加入圖片</button>
+          <span>加入 2 到 15 張照片或影片就能開始拼圖，也可以直接把照片拖進來。放了影片，拼圖就會動，匯出成影片。</span>
+          <button class="btn primary" id="collageEmptyBtn">加入照片或影片</button>
         </div>
       </div>
       <div class="stage-foot"><span id="collageInfo"></span></div>
@@ -202,6 +202,7 @@
 
 <input type="file" id="fileImg" accept="image/*" hidden>
 <input type="file" id="fileImgs" accept="image/*" multiple hidden>
+<input type="file" id="fileCollage" accept="image/*,video/*" multiple hidden>
 <input type="file" id="fileMedia" accept="video/*,image/*,audio/*" multiple hidden>
 <input type="file" id="fileAudio" accept="audio/*" hidden>
 
@@ -213,7 +214,7 @@
   }
   // 每次改版把 VERSION 加一。只有在 GitHub Pages 才加版本參數，避免瀏覽器繼續用舊的程式檔
   (function () {
-    var VERSION = '49', bust = /github\.io$/.test(location.hostname) ? '?v=' + VERSION : '';
+    var VERSION = '50', bust = /github\.io$/.test(location.hostname) ? '?v=' + VERSION : '';
     window.APP_VERSION = VERSION;
     if (bust) {
       var css = document.createElement('link');

@@ -1,6 +1,6 @@
 // 模式切換、上方工具列、匯出設定
 let MODE = 'home';
-const OPEN_LABEL = { photo: '開啟圖片', collage: '加入圖片', video: '加入素材' };
+const OPEN_LABEL = { photo: '開啟圖片', collage: '加入素材', video: '加入素材' };
 const MODES = ['home', 'auto', 'avatar', 'photo', 'collage', 'video'];
 
 // 匯出設定會記在瀏覽器裡，下次打開沿用
@@ -73,7 +73,7 @@ async function openForMode(files) {
     const f = (files || await pickFiles($('#fileImg'))).find(x => x.type.startsWith('image/'));
     if (!f) return;
     try { setPhotoImage(await fileToCanvas(f, PHOTO_MAX)); } catch (e) { toast('無法讀取 ' + f.name); }
-  } else if (MODE === 'collage') addCollageFiles(files || await pickFiles($('#fileImgs')));
+  } else if (MODE === 'collage') addCollageFiles(files || await pickFiles($('#fileCollage')));
   else addMedia(files || await pickFiles($('#fileMedia')));
 }
 
@@ -88,9 +88,16 @@ function openExportDialog() {
   card.style.maxWidth = '';
   card.replaceChildren();
   const pick = (key, options) => chips(card, options, e[key], v => { e[key] = v; saveExp(); openExportDialog(); });
-  card.append(h('h2', { text: mode === 'video' ? '匯出影片' : '匯出圖片' }));
+  const cVideo = mode === 'collage' && collageHasVideo();
+  card.append(h('h2', { text: mode === 'video' || cVideo ? '匯出影片' : '匯出圖片' }));
 
-  if (mode !== 'video') {
+  if (cVideo) {
+    const [w, hh] = collageVideoSize(), sec = collageVideoDur();
+    card.append(h('p', { text: '這張拼圖裡有影片，會匯出成 MP4 影片：' + w + ' × ' + hh + '，長度 ' + fmtTime(sec) + '（照最長的那段影片，短的會重複播）。' }));
+    const sound = C.imgs.filter(it => it.vid && it.sound).length;
+    card.append(h('p', { text: sound ? '會錄進 ' + sound + ' 段影片的聲音。想改的話，點那一格，在右邊開關聲音。' : '所有影片都關掉了聲音，匯出的影片會沒有聲音。' }));
+    card.append(h('p', { text: '影片會照實際速度錄一次，需要 ' + fmtTime(sec) + '，匯出期間請讓畫面開著。' }));
+  } else if (mode !== 'video') {
     card.append(h('h3', { text: '格式' }));
     pick('fmt', [['jpg', 'JPG'], ['png', 'PNG（不失真）'], ['webp', 'WebP']]);
     if (e.fmt !== 'png') { card.append(h('h3', { text: '畫質' })); pick('q', QUALITY_PRESETS); }
@@ -144,9 +151,9 @@ function openExportDialog() {
 const NEXT_WORK = {
   photo: ['再修一張', async () => { const [f] = await pickFiles($('#fileImg')); if (f) openForMode([f]); }],
   collage: ['再拼一張', async () => {
-    const files = (await pickFiles($('#fileImgs'))).filter(f => f.type.startsWith('image/'));
+    const files = (await pickFiles($('#fileCollage'))).filter(f => f.type.startsWith('image/') || f.type.startsWith('video/'));
     if (!files.length) return;
-    C.imgs = []; C.sel = -1; C.layout = 0;
+    collageReset();
     addCollageFiles(files);
   }],
   video: ['剪新影片', async () => {
@@ -186,7 +193,7 @@ function showDoneBar() {
     if (isVideo) btn('', '另存 GIF 動圖', () => { const was = EXP.video.fmt; EXP.video.fmt = 'gif'; exportVideo(); EXP.video.fmt = was; }, '把影片前 15 秒做成會動的圖片');
     if (V.texts.some(t => t.auto) && isVideo) btn('', '匯出字幕檔', exportSrt, 'SRT 字幕檔，可以上傳到 YouTube');
   }
-  if (mode === 'photo') btn('', '拿去拼圖', () => { const c = mk(4, 4); renderPhoto(c, 0, { final: true }); C.imgs = [{ cv: c, ox: 0.5, oy: 0.5, zoom: 1 }]; C.sel = -1; C.layout = 0; setMode('collage'); collagePanel(); drawCollage(); toast('再加幾張照片就能拼成一張'); }, '把修好的照片放進拼圖');
+  if (mode === 'photo') btn('', '拿去拼圖', () => { const c = mk(4, 4); renderPhoto(c, 0, { final: true }); collageReset(); C.imgs = [{ cv: c, ox: 0.5, oy: 0.5, zoom: 1 }]; setMode('collage'); collagePanel(); drawCollage(); toast('再加幾張照片就能拼成一張'); }, '把修好的照片放進拼圖');
   if (shareLast()) btn('', '分享', async () => { try { await navigator.share({ files: [shareLast()] }); } catch (e) { /* 取消 */ } }, '傳到 LINE、Instagram 等 App');
   btn('', '繼續修改', () => {}, '留在這件作品，繼續編輯');
   btn('ghost', '回首頁', () => setMode('home'));
@@ -205,7 +212,7 @@ function hasWork(mode) {
 }
 function freshStart(mode) {
   if (mode === 'photo') { P.base = null; P.paint = null; P.objects = []; P.sel = null; P.link = null; P.hist = []; P.redo = []; syncPhotoEmpty(); }
-  else if (mode === 'collage') { C.imgs = []; C.sel = -1; C.layout = 0; collagePanel(); drawCollage(); }
+  else if (mode === 'collage') { collageReset(); collagePanel(); drawCollage(); }
   else if (mode === 'video') newVideoProject();
 }
 function enterMode(mode) {

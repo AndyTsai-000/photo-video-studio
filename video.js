@@ -103,13 +103,34 @@ function drawClip(ctx, c, local, W, H) {
   const fadeLen = Math.min(0.5, d / 2), fin = c.fadeIn || c.fade, fout = c.fadeOut || c.fade;
   if (fin || fout) ctx.globalAlpha = clamp(Math.min(fin ? local / fadeLen : 1, fout ? (d - local) / fadeLen : 1), 0, 1);
   // 模糊背景：先鋪一層放大、模糊的同一個畫面，再把完整畫面疊上去
-  if (c.fit === 'blur') put(cover * 1.1, (f.css === 'none' ? '' : f.css + ' ') + 'blur(' + Math.round(H / 30) + 'px) brightness(.65)', null);
+  if (c.fit === 'blur') blurBackdrop(ctx, c, sw, sh, cover * 1.1, f.css, W, H);
   put((c.fit === 'cover' ? cover : contain) * c.zoom * kb, f.css, f.overlay);
   if (c.vig) {
     const diag = Math.hypot(W, H) / 2, g = ctx.createRadialGradient(W / 2, H / 2, diag * 0.45, W / 2, H / 2, diag);
     g.addColorStop(0, 'rgba(0,0,0,0)'); g.addColorStop(1, 'rgba(0,0,0,' + (c.vig / 100 * 0.85) + ')');
     ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
   }
+  ctx.restore();
+}
+// 模糊背景：先把畫面畫進很小的畫布再放大，放大時自然變模糊。
+// 直接在大畫布上用 blur 濾鏡非常耗效能，1080p 以上匯出會跟不上、影片變卡
+function blurBackdrop(ctx, c, sw, sh, sc, css, W, H) {
+  const k = 1 / 12, bw = Math.max(8, Math.round(W * k)), bh = Math.max(8, Math.round(H * k));
+  if (!V.blurCv) V.blurCv = mk(bw, bh);
+  const b = V.blurCv;
+  if (b.width !== bw || b.height !== bh) { b.width = bw; b.height = bh; }
+  const x = b.getContext('2d'), dw = sw * sc * k, dh = sh * sc * k;
+  x.setTransform(1, 0, 0, 1, 0, 0); x.globalAlpha = 1; x.fillStyle = '#000'; x.fillRect(0, 0, bw, bh);
+  x.save();
+  x.translate(bw / 2, bh / 2); x.rotate(c.rot * Math.PI / 180); x.scale(c.flip ? -1 : 1, 1);
+  if (HAS_FILTER) x.filter = (css === 'none' ? '' : css + ' ') + 'blur(1.5px) brightness(.65)';
+  x.drawImage(c.el, -dw / 2, -dh / 2, dw, dh);
+  x.restore();
+  x.filter = 'none';
+  if (!HAS_FILTER) { x.fillStyle = 'rgba(0,0,0,.35)'; x.fillRect(0, 0, bw, bh); }
+  ctx.save();
+  ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage(b, 0, 0, W, H);
   ctx.restore();
 }
 function drawFrame() {
@@ -213,7 +234,7 @@ function setGain(el, vol) {
 // ── 播放 ──
 function activate(c, local) {
   if (V.active && V.active.kind === 'video' && V.active.el !== c.el) V.active.el.pause();
-  V.active = c;
+  V.active = c; V.ctEl = null;
   if (c.kind !== 'video') return;
   const v = c.el, want = c.in + local * c.speed;
   if (Math.abs(v.currentTime - want) > 0.08) v.currentTime = want;
@@ -267,7 +288,7 @@ function tick(now) {
   if (V.active !== c) activate(c, L.local);
   if (c.kind === 'video') {
     const v = c.el;
-    if (v.paused && !v.ended && v.currentTime < c.out - 0.02 && now - (V.retryAt || 0) > 500) {
+    if (v.paused && !v.ended && !V.busyPaused && v.currentTime < c.out - 0.02 && now - (V.retryAt || 0) > 500) {
       V.retryAt = now;
       v.play().catch(err => { if (err && err.name === 'NotAllowedError' && V.playing) askTapToPlay(v); });
     }
@@ -275,17 +296,56 @@ function tick(now) {
       if (v.currentTime >= c.out - 0.02 || v.ended) V.t = L.start + clipDur(c) + 0.0005;
       else V.t = Math.max(V.t, L.start + Math.max(0, (v.currentTime - c.in) / c.speed));
     }
-  } else V.t += dt;
-  syncAudio(false);
+  } else if (!V.hold) V.t += dt;
+  preroll(L, now);
+  const held = exportHold(c, now);
+  if (!held) syncAudio(false);
   if (V.music && V.music.fadeOut) setGain(V.music.el, V.music.vol * clamp((total - V.t) / 2, 0, 1));
   if (V.t >= total) { finishPlayback(total); return; }
   // 這一格要跨到下一段、而且下一段有設轉場：畫布上還是這一段的最後一格，先留下來做過場
   const nx = V.clips[L.idx + 1];
   if (nx && nx.trans && nx.trans !== 'none' && V.t >= L.start + clipDur(c)) { V.prevFrame = cloneCanvas(VC); V.prevFor = nx.id; }
   drawFrame(); updatePlayhead();
-  encodeFrame(false);
+  if (!held) encodeFrame(false);
   if (V.gif && gifGrab()) return;
   requestAnimationFrame(tick);
+}
+// 匯出時，下一段影片快輪到了就先跳到它的開頭，切換時才不用等
+function preroll(L, now) {
+  const nx = V.clips[L.idx + 1], c = L.clip;
+  if (!nx || nx.kind !== 'video' || (c.kind === 'video' && nx.el === c.el)) return;
+  if (L.start + clipDur(c) - V.t > 0.8 || !nx.el.paused || nx.el.seeking) return;
+  if (Math.abs(nx.el.currentTime - nx.in) > 0.08) nx.el.currentTime = nx.in;
+}
+// 匯出時影片在跳轉、還沒開始播或解碼跟不上：先暫停錄影的時鐘和其他聲音，等畫面動起來再繼續。
+// 不然這段時間會一直錄到同一格畫面，成品就會卡住
+function exportHold(c, now) {
+  let stuck = false, busy = false;
+  // 編碼器跟不上（排隊的畫面太多）：連影片一起暫停，等它消化完再繼續，寧可匯出久一點也不要掉格
+  if (V.exporting && V.enc) { const q = V.enc.ve.encodeQueueSize; busy = q > 8 || (V.busy && q > 2); }
+  V.busy = busy;
+  if (!busy && V.busyPaused) { V.busyPaused = false; V.ctEl = null; if (c.kind === 'video') c.el.play().catch(() => {}); }
+  if (busy && c.kind === 'video' && !c.el.paused) { c.el.pause(); V.busyPaused = true; }
+  if (V.exporting && !V.gif && c.kind === 'video') {
+    const v = c.el;
+    // 剛切到這段影片：要等它真的開始往前播（時間有在走）才算準備好；播到一半停住超過 0.4 秒也算卡住
+    if (V.ctEl !== v) { V.ctEl = v; V.ct = v.currentTime; V.ctAt = now; V.ctMoved = false; }
+    else if (v.currentTime !== V.ct) { V.ctMoved = !v.seeking && Math.abs(v.currentTime - V.ct) < 1; V.ct = v.currentTime; V.ctAt = now; }
+    stuck = v.seeking || v.readyState < 2 || (v.paused && !v.ended && v.currentTime < c.out - 0.02) || !V.ctMoved || now - V.ctAt > 400;
+  }
+  stuck = stuck || busy;
+  if (stuck && !V.hold) {
+    V.hold = now;
+    for (const a of audioItems()) a.el.pause();
+    if (V.enc) V.enc.paused = true;
+    if (V.rec && V.rec.state === 'recording') try { V.rec.pause(); } catch (e) { /* 略過 */ }
+  } else if (!stuck && V.hold) {
+    if (V.enc) { V.enc.t0 += now - V.hold; V.enc.paused = false; }
+    V.hold = 0;
+    if (V.rec && V.rec.state === 'paused') try { V.rec.resume(); } catch (e) { /* 略過 */ }
+    syncAudio(true);
+  }
+  return stuck;
 }
 function askTapToPlay(v) {
   if ($('#tapPlay')) return;
@@ -893,7 +953,7 @@ async function makeMp4Encoder(w, hh, fps, bitrate) {
   E.mute = ac.createGain(); E.mute.gain.value = 0;
   V.audio.master.connect(E.tap); E.tap.connect(E.mute); E.mute.connect(ac.destination);
   E.tap.onaudioprocess = ev => {
-    if (!E.on || E.error) return;
+    if (!E.on || E.error || E.paused) return;
     const n = ev.inputBuffer.length, data = new Float32Array(n * 2);
     data.set(ev.inputBuffer.getChannelData(0), 0);
     data.set(ev.inputBuffer.numberOfChannels > 1 ? ev.inputBuffer.getChannelData(1) : ev.inputBuffer.getChannelData(0), n);
@@ -907,7 +967,7 @@ async function makeMp4Encoder(w, hh, fps, bitrate) {
 // 播放迴圈每畫完一格就呼叫：照設定的格數把畫布送進編碼器
 function encodeFrame(force) {
   const E = V.enc;
-  if (!E || !E.on || E.error) return;
+  if (!E || !E.on || E.error || E.paused) return;
   const n = Math.floor((performance.now() - E.t0) / 1000 * E.fps);
   if (n <= E.last && !force) return;
   if (E.ve.encodeQueueSize > 12) return;   // 電腦編不過來時跳過這一格，不讓記憶體堆積
@@ -915,14 +975,14 @@ function encodeFrame(force) {
   E.last = idx;
   const key = idx - E.lastKey >= E.fps * 2;
   if (key) E.lastKey = idx;
-  const frame = new VideoFrame(VC, { timestamp: Math.round(idx * 1e6 / E.fps), duration: Math.round(1e6 / E.fps) });
+  const frame = new VideoFrame(E.src || VC, { timestamp: Math.round(idx * 1e6 / E.fps), duration: Math.round(1e6 / E.fps) });
   try { E.ve.encode(frame, { keyFrame: key }); } catch (e) { E.error = e; }
   frame.close();
 }
 function endExportUi() {
   $('#exportOverlay').hidden = true;
   $('#exportTitle').textContent = '正在匯出影片';
-  V.exporting = false; V.rec = null; V.enc = null; V.gif = null; V.res = 720; setVideoSize();
+  V.exporting = false; V.rec = null; V.enc = null; V.gif = null; V.hold = 0; V.busy = V.busyPaused = false; V.res = 720; setVideoSize();
   keepAwake(false);
   if (V.hiddenDuringExport) { V.hiddenDuringExport = false; setTimeout(() => toast('匯出途中離開過這個畫面，影片裡可能有幾秒停格。最好讓畫面一直開著匯出。', 7000), 1500); }
   if (V.audio) V.audio.master.gain.value = 1;
@@ -936,6 +996,7 @@ function closeEncoder(E) {
 async function finishEncode() {
   const E = V.enc;
   if (!E) return;
+  E.paused = false;
   encodeFrame(true);   // 補上最後一格
   E.on = false;
   $('#exportTitle').textContent = '正在完成檔案…';
@@ -946,7 +1007,7 @@ async function finishEncode() {
     const blob = new Blob([E.target.buffer], { type: 'video/mp4' });
     closeEncoder(E); endExportUi();
     if (V.cancelled) { toast('已取消匯出'); return; }
-    saveFile('剪輯作品.mp4', blob);
+    saveFile(E.name || '剪輯作品.mp4', blob);
   } catch (e) {
     if (V.cancelled) return;   // 收尾途中被取消，取消那邊已經處理好了
     closeEncoder(E); endExportUi();

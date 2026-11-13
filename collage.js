@@ -2,6 +2,7 @@
 const CV2 = $('#cv2');
 const COLLAGE_SIDE = 2400;
 const COLLAGE_MAX = 15;   // 一張拼圖最多幾張照片
+const COLLAGE_VIDEO_MAX = 4, COLLAGE_VIDEO_SEC = 60;   // 影片同時播放太多段手機會跑不動
 const C = {
   imgs: [], layout: 0, gap: 0, radius: 0, bg: '#ffffff', ratio: '1:1', sel: -1
 };
@@ -110,7 +111,8 @@ function renderCollage(target, scale, final) {
     ctx.save();
     roundRectPath(ctx, r.x, r.y, r.w, r.h, rad); ctx.clip();
     ctx.imageSmoothingQuality = 'high';
-    ctx.drawImage(it.cv, r.x - (dw - r.w) * it.ox, r.y - (dh - r.h) * it.oy, dw, dh);
+    // 影片格畫當下這一格畫面；還沒載入好就先畫封面
+    ctx.drawImage(it.vid && it.vid.readyState >= 2 ? it.vid : it.cv, r.x - (dw - r.w) * it.ox, r.y - (dh - r.h) * it.oy, dw, dh);
     ctx.restore();
     const dropHere = !final && cDrag && cDrag.target === i;
     if (!final && (i === C.sel || dropHere)) {
@@ -134,19 +136,75 @@ function drawCollage() {
   renderCollage(CV2, 0.5, false);
   fit(CV2);
   const k = +EXP.collage.side / COLLAGE_SIDE, [w, hh] = collageSize().map(v => Math.round(v * k));
-  $('#collageInfo').textContent = C.imgs.length
-    ? C.imgs.length + ' 張照片　輸出 ' + w + ' × ' + hh + ' 像素'
-    : '';
+  const nv = C.imgs.filter(it => it.vid).length;
+  $('#collageInfo').textContent = !C.imgs.length ? ''
+    : nv ? (C.imgs.length - nv ? (C.imgs.length - nv) + ' 張照片、' : '') + nv + ' 段影片　匯出成 ' + fmtTime(collageVideoDur()) + ' 的影片'
+      : C.imgs.length + ' 張照片　輸出 ' + w + ' × ' + hh + ' 像素';
+  collageLoop();
 }
 
+// ── 影片格：拼圖裡的影片會一直重複播放；匯出時錄成一支影片 ──
+function collageHasVideo() { return C.imgs.some(it => it.vid); }
+function collageVideoDur() {
+  const d = Math.max(0, ...C.imgs.filter(it => it.vid).map(it => isFinite(it.vid.duration) ? it.vid.duration : 0));
+  return Math.min(COLLAGE_VIDEO_SEC, d || 5);
+}
+function collageVideoSize() {
+  const [W0, H0] = collageSize(), k = Math.min(1, 1920 / Math.max(W0, H0));
+  return [Math.max(2, Math.round(W0 * k) & ~1), Math.max(2, Math.round(H0 * k) & ~1)];
+}
+async function collageVideoItem(f) {
+  const v = document.createElement('video');
+  v.muted = true; v.loop = true; v.playsInline = true; v.preload = 'auto';
+  v.setAttribute('playsinline', ''); v.setAttribute('muted', '');
+  v.src = URL.createObjectURL(f);
+  await new Promise((res, rej) => { v.onloadeddata = res; v.onerror = () => rej(new Error('format')); });
+  if (!isFinite(v.duration)) await waitSeek(v, 1e7);   // 有些錄製檔一開始不知道長度
+  await waitSeek(v, Math.min(0.1, (isFinite(v.duration) && v.duration) ? v.duration / 2 : 0.1));
+  const vw = v.videoWidth || 16, vh = v.videoHeight || 9, s = Math.min(1, 1280 / Math.max(vw, vh));
+  const cv = mk(Math.round(vw * s), Math.round(vh * s));
+  cv.getContext('2d').drawImage(v, 0, 0, cv.width, cv.height);
+  // 第一段影片預設有聲音，其他段靜音，免得好幾段聲音混在一起
+  return { cv, vid: v, sound: !collageHasVideo(), ox: 0.5, oy: 0.5, zoom: 1 };
+}
+function dropCollageVideo(it) {
+  if (!it || !it.vid) return;
+  it.vid.pause(); URL.revokeObjectURL(it.vid.src); it.vid = null;
+}
+function collageReset() {
+  C.imgs.forEach(dropCollageVideo);
+  C.imgs = []; C.sel = -1; C.layout = 0;
+}
+// 在拼圖畫面而且有影片時，持續重畫讓影片動起來；離開拼圖就停下來
+let cLoopOn = false, cLoopAt = 0;
+function collageLoop() {
+  const want = () => MODE === 'collage' && collageHasVideo() && !document.hidden && !C.exporting;
+  if (!want() || cLoopOn) return;
+  cLoopOn = true;
+  for (const it of C.imgs) if (it.vid) it.vid.play().catch(() => {});
+  const step = now => {
+    if (!want()) {
+      cLoopOn = false;
+      if (!C.exporting) for (const it of C.imgs) if (it.vid) it.vid.pause();
+      return;
+    }
+    if (now - cLoopAt > 30) { cLoopAt = now; renderCollage(CV2, 0.5, false); }
+    requestAnimationFrame(step);
+  };
+  requestAnimationFrame(step);
+}
+document.addEventListener('visibilitychange', () => { if (!document.hidden) collageLoop(); });
+
 async function addCollageFiles(files) {
-  const imgs = files.filter(f => f.type.startsWith('image/'));
+  const imgs = files.filter(f => f.type.startsWith('image/') || f.type.startsWith('video/'));
   if (!imgs.length) return;
   const before = C.imgs.length;
   for (const f of imgs) {
-    if (C.imgs.length >= COLLAGE_MAX) { toast('一張拼圖最多放 ' + COLLAGE_MAX + ' 張圖'); break; }
-    try { C.imgs.push({ cv: await fileToCanvas(f, 2400), ox: 0.5, oy: 0.5, zoom: 1 }); }
-    catch (e) { toast('無法讀取 ' + f.name); }
+    if (C.imgs.length >= COLLAGE_MAX) { toast('一張拼圖最多放 ' + COLLAGE_MAX + ' 張'); break; }
+    const isVid = f.type.startsWith('video/');
+    if (isVid && C.imgs.filter(it => it.vid).length >= COLLAGE_VIDEO_MAX) { toast('一張拼圖最多放 ' + COLLAGE_VIDEO_MAX + ' 段影片，太多段手機會播不動'); continue; }
+    try { C.imgs.push(isVid ? await collageVideoItem(f) : { cv: await fileToCanvas(f, 2400), ox: 0.5, oy: 0.5, zoom: 1 }); }
+    catch (e) { toast('無法讀取 ' + f.name + (isVid ? '，這個瀏覽器可能不支援這種影片格式' : '')); }
   }
   if (C.imgs.length !== before) C.layout = 0;
   C.sel = -1;
@@ -217,10 +275,10 @@ function collagePanel() {
   let el = root;
   el.replaceChildren();
   el.append(h('h2', { text: '拼圖' }));
-  el.append(h('button', { class: 'btn primary wide', text: '加入圖片（最多 ' + COLLAGE_MAX + ' 張）', onclick: async () => addCollageFiles(await pickFiles($('#fileImgs'))) }));
-  if (!C.imgs.length) { el.append(h('p', { text: '先選照片。選了幾張，這裡就會出現那個張數可以用的版型。' })); return; }
+  el.append(h('button', { class: 'btn primary wide', text: '加入照片或影片（最多 ' + COLLAGE_MAX + ' 張）', onclick: async () => addCollageFiles(await pickFiles($('#fileCollage'))) }));
+  if (!C.imgs.length) { el.append(h('p', { text: '先選照片或影片。選了幾張，這裡就會出現那個張數可以用的版型。' })); return; }
 
-  el = group(root, 'col.layout', C.imgs.length + ' 張照片的版型');
+  el = group(root, 'col.layout', C.imgs.length + ' 格的版型');
   const layHead = h('span');
   const lay = h('div', { class: 'layouts' });
   layoutList().forEach((rects, i) => {
@@ -238,19 +296,29 @@ function collagePanel() {
 
   el = root;
   const it = C.imgs[C.sel];
-  if (!it) el.append(h('p', { text: '按住照片拖到另一格，放開就會交換位置。在同一格裡拖曳，可以移動照片顯示的範圍。' }));
+  if (!it) el.append(h('p', { text: '按住照片拖到另一格，放開就會交換位置。在同一格裡拖曳，可以移動照片顯示的範圍。' + (collageHasVideo() ? '點影片那一格可以開關它的聲音。' : '') }));
   else {
-    el = group(root, 'col.sel', '選取的照片（第 ' + (C.sel + 1) + ' 格）', true);
+    el = group(root, 'col.sel', '選取的' + (it.vid ? '影片' : '照片') + '（第 ' + (C.sel + 1) + ' 格）', true);
     slider(el, { label: '放大', min: 100, max: 300, value: Math.round(it.zoom * 100), def: 100, fmt: v => v + '%', onInput: v => { it.zoom = v / 100; drawCollage(); } });
+    if (it.vid) {
+      el.append(h('h3', { text: '聲音' }));
+      chips(el, [['on', '有聲音'], ['off', '靜音']], it.sound ? 'on' : 'off', v => { it.sound = v === 'on'; collagePanel(); });
+    }
     el.append(h('div', { class: 'chips' },
       h('button', {
-        class: 'btn', text: '換一張圖', onclick: async () => {
-          const [f] = await pickFiles($('#fileImg'));
+        class: 'btn', text: '換一張', onclick: async () => {
+          const [f] = await pickFiles($('#fileCollage'));
           if (!f) return;
-          try { it.cv = await fileToCanvas(f, 2400); it.ox = it.oy = 0.5; it.zoom = 1; drawCollage(); } catch (e) { toast('無法讀取 ' + f.name); }
+          const sel = C.sel;
+          try {
+            const nu = f.type.startsWith('video/') ? await collageVideoItem(f) : { cv: await fileToCanvas(f, 2400), ox: 0.5, oy: 0.5, zoom: 1 };
+            if (nu.vid && !it.vid && C.imgs.filter(x => x.vid).length >= COLLAGE_VIDEO_MAX) { dropCollageVideo(nu); toast('一張拼圖最多放 ' + COLLAGE_VIDEO_MAX + ' 段影片'); return; }
+            if (nu.vid) nu.sound = it.vid ? it.sound : !collageHasVideo();
+            dropCollageVideo(it); C.imgs[sel] = nu; collagePanel(); drawCollage();
+          } catch (e) { toast('無法讀取 ' + f.name); }
         }
       }),
-      h('button', { class: 'btn danger', text: '移除', onclick: () => { C.imgs.splice(C.sel, 1); C.sel = -1; C.layout = 0; collagePanel(); drawCollage(); } })));
+      h('button', { class: 'btn danger', text: '移除', onclick: () => { dropCollageVideo(C.imgs[C.sel]); C.imgs.splice(C.sel, 1); C.sel = -1; C.layout = 0; collagePanel(); drawCollage(); } })));
   }
   el = root;
   el.append(h('button', {
@@ -265,12 +333,93 @@ function collagePanel() {
   }));
 }
 function initCollage() {
-  $('#collageEmptyBtn').addEventListener('click', async () => addCollageFiles(await pickFiles($('#fileImgs'))));
+  $('#collageEmptyBtn').addEventListener('click', async () => addCollageFiles(await pickFiles($('#fileCollage'))));
   collagePanel();
 }
 function exportCollage() {
   if (!C.imgs.length) { toast('先加入圖片'); return; }
+  if (collageHasVideo()) { exportCollageVideo(); return; }
   const c = mk(4, 4);
   renderCollage(c, +EXP.collage.side / COLLAGE_SIDE, true);
   saveCanvas(c, '拼圖作品', EXP.collage);
+}
+
+// 拼圖影片匯出：所有影片從頭一起播，照實際速度把拼好的畫面錄成 MP4。編碼器和剪輯共用
+async function exportCollageVideo() {
+  if (V.exporting) return;
+  const vids = C.imgs.filter(it => it.vid), dur = collageVideoDur(), [w, hh] = collageVideoSize();
+  const [W0, H0] = collageSize(), k = Math.max(w / W0, hh / H0);
+  // 手機規定有聲音的影片要在按下按鈕的當下播過一次，之後程式才能播：先靜音播一下
+  ensureAudio();
+  if (V.audio) V.audio.master.gain.value = 0;
+  for (const it of vids) {
+    it.vid.muted = !it.sound;
+    setGain(it.vid, it.sound ? 1 : 0);
+    try { const p = it.vid.play(); if (p) p.catch(() => {}); } catch (e) { /* 略過 */ }
+  }
+  C.exporting = true;
+  V.exporting = true; V.cancelled = false; V.rec = null; V.enc = null;
+  keepAwake(true);
+  $('#exportBar').style.width = '0%';
+  $('#exportTitle').textContent = '正在匯出拼圖影片';
+  $('#exportOverlay').hidden = false;
+  const work = mk(4, 4), out = mk(w, hh), ox = out.getContext('2d');
+  const paint = () => { renderCollage(work, k, true); ox.drawImage(work, 0, 0); };
+  const stopVids = () => { for (const it of vids) if (it.vid) { it.vid.pause(); it.vid.muted = true; } };
+  const finish = () => { C.exporting = false; stopVids(); if (V.audio) V.audio.master.gain.value = 1; drawCollage(); };
+  // 全部跳回開頭
+  for (const it of vids) it.vid.pause();
+  await Promise.all(vids.map(it => waitSeek(it.vid, 0)));
+  const fps = 30, br = Math.min(40e6, Math.round(w * hh * fps * 0.12)), E = await makeMp4Encoder(w, hh, fps, br);
+  if (!V.exporting) { if (E) closeEncoder(E); finish(); return; }
+  paint();
+  let rec = null;
+  const chunks = [];
+  if (E) { E.src = out; E.name = '拼圖作品.mp4'; V.enc = E; }
+  else {
+    if (!window.MediaRecorder || !out.captureStream) { finish(); endExportUi(); toast('這個瀏覽器不支援影片匯出，請改用 Chrome 或 Edge', 4000); return; }
+    const stream = out.captureStream(fps);
+    if (V.audio) V.audio.dest.stream.getAudioTracks().forEach(t => stream.addTrack(t));
+    const mime = ['video/mp4;codecs=avc1.42E01E,mp4a.40.2', 'video/mp4', 'video/webm;codecs=vp9,opus', 'video/webm;codecs=vp8,opus', 'video/webm'].find(m => MediaRecorder.isTypeSupported(m));
+    try { rec = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: br }); }
+    catch (e) { finish(); endExportUi(); toast('無法開始錄製：' + e.message, 4000); return; }
+    const ext = mime && mime.startsWith('video/mp4') ? 'mp4' : 'webm';
+    rec.ondataavailable = ev => { if (ev.data && ev.data.size) chunks.push(ev.data); };
+    rec.onstop = () => {
+      stream.getVideoTracks().forEach(t => t.stop());
+      const cancelled = V.cancelled;
+      finish(); endExportUi();
+      if (cancelled) { toast('已取消匯出'); return; }
+      saveFile('拼圖作品.' + ext, new Blob(chunks, { type: 'video/' + ext }));
+    };
+    V.rec = rec;
+  }
+  if (V.audio) V.audio.master.gain.value = 1;
+  for (const it of vids) it.vid.play().catch(() => {});
+  // 等每段影片都真的開始播再開始錄
+  for (let i = 0; i < 40 && vids.some(it => it.vid.paused || it.vid.currentTime === 0); i++) await new Promise(r => setTimeout(r, 50));
+  if (!V.exporting || V.cancelled) { finish(); return; }
+  let t0 = performance.now(), held = 0;
+  if (E) { E.t0 = t0; E.on = true; } else rec.start(1000);
+  const step = now => {
+    if (!V.exporting || V.cancelled) { finish(); return; }
+    // 編碼器跟不上時，影片先一起暫停等它，寧可匯出久一點也不要掉格
+    if (E && (E.ve.encodeQueueSize > 8 || (held && E.ve.encodeQueueSize > 2))) {
+      if (!held) { held = now; E.paused = true; for (const it of vids) it.vid.pause(); }
+      requestAnimationFrame(step); return;
+    }
+    if (held) { E.t0 += now - held; t0 += now - held; held = 0; E.paused = false; for (const it of vids) it.vid.play().catch(() => {}); }
+    const t = (now - t0) / 1000;
+    paint();
+    if (E) encodeFrame(false);
+    $('#exportBar').style.width = Math.min(100, t / dur * 100) + '%';
+    if (t >= dur) {
+      stopVids();
+      if (E) finishEncode().then(finish);
+      else if (rec.state !== 'inactive') rec.stop();
+      return;
+    }
+    requestAnimationFrame(step);
+  };
+  requestAnimationFrame(step);
 }
