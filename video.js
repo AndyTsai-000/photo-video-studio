@@ -916,8 +916,10 @@ async function encoderWorks(cfg) {
   } catch (e) { return false; }
   finally { try { if (ve && ve.state !== 'closed') ve.close(); } catch (e) { /* 略過 */ } }
 }
-async function makeMp4Encoder(w, hh, fps, bitrate) {
-  if (!window.VideoEncoder || !window.AudioEncoder || !window.VideoFrame || !window.AudioData || !V.audio) return null;
+// noAudio：只有畫面的影片（拼圖影片），不需要聲音編碼器，手機比較常支援
+async function makeMp4Encoder(w, hh, fps, bitrate, noAudio) {
+  if (!window.VideoEncoder || !window.VideoFrame) return null;
+  if (!noAudio && (!window.AudioEncoder || !window.AudioData || !V.audio)) return null;
   try { await loadMuxer(); } catch (e) { return null; }
   // H.264 的 level 依畫面大小和格數挑最低夠用的，舊裝置比較播得動；不支援再往上試
   const load = w * hh * fps, levels = ['64001F', '640028', '64002A', '640033'];
@@ -931,6 +933,15 @@ async function makeMp4Encoder(w, hh, fps, bitrate) {
   if (vcfg && !(await encoderWorks(vcfg))) {
     const soft = { ...vcfg, hardwareAcceleration: 'prefer-software' };
     try { vcfg = (await VideoEncoder.isConfigSupported(soft)).supported && (await encoderWorks(soft)) ? soft : null; } catch (e) { vcfg = null; }
+  }
+  if (noAudio) {
+    if (!vcfg) return null;
+    const target = new Mp4Muxer.ArrayBufferTarget();
+    const muxer = new Mp4Muxer.Muxer({ target, fastStart: 'in-memory', firstTimestampBehavior: 'offset', video: { codec: 'avc', width: w, height: hh, frameRate: fps } });
+    const E = { muxer, target, fps, on: false, t0: 0, last: -1, lastKey: -1e9, error: null, tap: null, ae: null };
+    E.ve = new VideoEncoder({ output: (chunk, meta) => muxer.addVideoChunk(chunk, meta), error: e => { E.error = e; } });
+    E.ve.configure(vcfg);
+    return E;
   }
   const sr = V.audio.ac.sampleRate, acfg = { codec: 'mp4a.40.2', sampleRate: sr, numberOfChannels: 2, bitrate: 160000 };
   let audioOk = false;
@@ -989,19 +1000,21 @@ function endExportUi() {
 }
 function closeEncoder(E) {
   E.on = false;
-  E.tap.onaudioprocess = null;
-  try { V.audio.master.disconnect(E.tap); E.tap.disconnect(); E.mute.disconnect(); } catch (e) { /* 已經拔掉了 */ }
-  try { if (E.ve.state !== 'closed') E.ve.close(); if (E.ae.state !== 'closed') E.ae.close(); } catch (e) { /* 略過 */ }
+  if (E.tap) {
+    E.tap.onaudioprocess = null;
+    try { V.audio.master.disconnect(E.tap); E.tap.disconnect(); E.mute.disconnect(); } catch (e) { /* 已經拔掉了 */ }
+  }
+  try { if (E.ve.state !== 'closed') E.ve.close(); if (E.ae && E.ae.state !== 'closed') E.ae.close(); } catch (e) { /* 略過 */ }
 }
 async function finishEncode() {
   const E = V.enc;
   if (!E) return;
   E.paused = false;
-  encodeFrame(true);   // 補上最後一格
+  if (!E.manual) encodeFrame(true);   // 補上最後一格（自己逐格送的拼圖影片不用補）
   E.on = false;
   $('#exportTitle').textContent = '正在完成檔案…';
   try {
-    await E.ve.flush(); await E.ae.flush();
+    await E.ve.flush(); if (E.ae) await E.ae.flush();
     if (E.error) throw E.error;
     E.muxer.finalize();
     const blob = new Blob([E.target.buffer], { type: 'video/mp4' });

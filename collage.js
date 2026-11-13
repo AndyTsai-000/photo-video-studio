@@ -153,34 +153,60 @@ function collageVideoSize() {
   const [W0, H0] = collageSize(), k = Math.min(1, 1920 / Math.max(W0, H0));
   return [Math.max(2, Math.round(W0 * k) & ~1), Math.max(2, Math.round(H0 * k) & ~1)];
 }
+// 影片放在畫面外一個看不到的小框裡：有些手機的影片不在網頁上就不會解碼畫面
+let cVidHost = null;
+function collageVidHost() {
+  if (!cVidHost) {
+    cVidHost = document.createElement('div');
+    cVidHost.style.cssText = 'position:fixed;left:0;top:0;width:2px;height:2px;overflow:hidden;opacity:0;pointer-events:none;z-index:-1';
+    document.body.appendChild(cVidHost);
+  }
+  return cVidHost;
+}
 async function collageVideoItem(f) {
   const v = document.createElement('video');
   v.muted = true; v.loop = true; v.playsInline = true; v.preload = 'auto';
   v.setAttribute('playsinline', ''); v.setAttribute('muted', '');
+  v.style.cssText = 'width:2px;height:2px';
+  collageVidHost().appendChild(v);
   v.src = URL.createObjectURL(f);
-  // 只等「知道影片大小和長度」就好：iPhone 等手機在影片播放前不會先載入畫面，等畫面會一直卡住
-  await new Promise((res, rej) => {
-    const t = setTimeout(() => rej(new Error('timeout')), 20000);
-    v.onloadedmetadata = () => { clearTimeout(t); res(); };
-    v.onerror = () => { clearTimeout(t); rej(new Error('format')); };
-  });
+  try {
+    // 只等「知道影片大小和長度」就好：iPhone 等手機在影片播放前不會先載入畫面，等畫面會一直卡住
+    await new Promise((res, rej) => {
+      const t = setTimeout(() => rej(new Error('timeout')), 20000);
+      v.onloadedmetadata = () => { clearTimeout(t); res(); };
+      v.onerror = () => { clearTimeout(t); rej(new Error('format')); };
+    });
+  } catch (e) { v.remove(); URL.revokeObjectURL(v.src); throw e; }
   if (!isFinite(v.duration)) await waitSeek(v, 1e7);   // 有些錄製檔一開始不知道長度
-  // 沒聲音的影片手機允許直接播：播一下再停，讓瀏覽器把畫面載進來
+  // 沒聲音的影片手機通常允許直接播：播一下再停，讓瀏覽器把畫面載進來
   if (v.readyState < 2) {
-    await Promise.race([v.play().then(() => v.pause()).catch(() => {}), new Promise(r => setTimeout(r, 3000))]);
+    await Promise.race([v.play().then(() => v.pause()).catch(() => {}), new Promise(r => setTimeout(r, 1500))]);
   }
   await waitSeek(v, Math.min(0.1, (isFinite(v.duration) && v.duration) ? v.duration / 2 : 0.1));
-  if (v.readyState < 2) await new Promise(r => { v.addEventListener('loadeddata', r, { once: true }); setTimeout(r, 3000); });
   const vw = v.videoWidth || 16, vh = v.videoHeight || 9, s = Math.min(1, 1280 / Math.max(vw, vh));
   const cv = mk(Math.round(vw * s), Math.round(vh * s));
-  cv.getContext('2d').drawImage(v, 0, 0, cv.width, cv.height);
+  const it = { cv, vid: v, ox: 0.5, oy: 0.5, zoom: 1, poster: false };
+  const grab = () => {
+    if (it.poster || v.readyState < 2) return;
+    try { cv.getContext('2d').drawImage(v, 0, 0, cv.width, cv.height); it.poster = true; } catch (e) { /* 下次再試 */ }
+  };
+  grab();
+  // 手機不讓影片自己播時，封面要等使用者點一下、影片開始播才拿得到
+  if (!it.poster) { v.addEventListener('loadeddata', grab); v.addEventListener('timeupdate', grab); }
   // 拼圖裡的影片一律不出聲，只看畫面
-  return { cv, vid: v, ox: 0.5, oy: 0.5, zoom: 1 };
+  return it;
 }
 function dropCollageVideo(it) {
   if (!it || !it.vid) return;
-  it.vid.pause(); URL.revokeObjectURL(it.vid.src); it.vid = null;
+  it.vid.pause(); URL.revokeObjectURL(it.vid.src); it.vid.remove(); it.vid = null;
 }
+// 手機省電模式等情況下影片不會自己播：在拼圖畫面點任何地方就開始播
+function collagePlayAll() {
+  if (MODE !== 'collage' || C.exporting) return;
+  for (const it of C.imgs) if (it.vid && it.vid.paused) it.vid.play().catch(() => {});
+}
+document.addEventListener('pointerdown', collagePlayAll, true);
 function collageReset() {
   C.imgs.forEach(dropCollageVideo);
   C.imgs = []; C.sel = -1; C.layout = 0;
@@ -210,18 +236,29 @@ const isCollageVideo = f => f.type.startsWith('video/') || (!f.type && /\.(mp4|m
 async function addCollageFiles(files) {
   const imgs = files.filter(f => f.type.startsWith('image/') || isCollageVideo(f));
   if (!imgs.length) return;
-  const before = C.imgs.length;
-  if (imgs.some(isCollageVideo)) toast('正在讀取影片…');
+  const before = C.imgs.length, pick = [];
+  let nv = C.imgs.filter(it => it.vid).length, full = false, many = false;
   for (const f of imgs) {
-    if (C.imgs.length >= COLLAGE_MAX) { toast('一張拼圖最多放 ' + COLLAGE_MAX + ' 張'); break; }
-    const isVid = isCollageVideo(f);
-    if (isVid && C.imgs.filter(it => it.vid).length >= COLLAGE_VIDEO_MAX) { toast('一張拼圖最多放 ' + COLLAGE_VIDEO_MAX + ' 段影片，太多段手機會播不動'); continue; }
-    try { C.imgs.push(isVid ? await collageVideoItem(f) : { cv: await fileToCanvas(f, 2400), ox: 0.5, oy: 0.5, zoom: 1 }); }
-    catch (e) { toast('無法讀取 ' + f.name + (isVid ? '，這個瀏覽器可能不支援這種影片格式' : '')); }
+    if (before + pick.length >= COLLAGE_MAX) { full = true; break; }
+    if (isCollageVideo(f)) { if (nv >= COLLAGE_VIDEO_MAX) { many = true; continue; } nv++; }
+    pick.push(f);
   }
+  const nvNew = pick.filter(isCollageVideo).length;
+  if (nvNew) toast('正在讀取 ' + nvNew + ' 段影片…', 20000);
+  // 全部同時讀，不用一個等一個
+  const items = await Promise.all(pick.map(f => (isCollageVideo(f) ? collageVideoItem(f) : fileToCanvas(f, 2400).then(cv => ({ cv, ox: 0.5, oy: 0.5, zoom: 1 })))
+    .catch(() => { toast('無法讀取 ' + f.name + (isCollageVideo(f) ? '，這個瀏覽器可能不支援這種影片格式' : '')); return null; })));
+  for (const it of items) if (it) C.imgs.push(it);
   if (C.imgs.length !== before) C.layout = 0;
   C.sel = -1;
   collagePanel(); drawCollage();
+  if (full) toast('一張拼圖最多放 ' + COLLAGE_MAX + ' 張');
+  else if (many) toast('一張拼圖最多放 ' + COLLAGE_VIDEO_MAX + ' 段影片，太多段手機會播不動');
+  else if (nvNew && items.some(Boolean)) {
+    $('#toast').hidden = true;
+    // 過一下還沒動起來，就是手機不讓影片自己播
+    setTimeout(() => { if (MODE === 'collage' && C.imgs.some(it => it.vid && it.vid.paused)) toast('點一下畫面，影片就會開始播放', 4000); }, 1200);
+  }
 }
 
 // 在格子裡拖曳可以移動照片位置
@@ -374,52 +411,94 @@ async function exportCollageVideo() {
   // 全部跳回開頭
   for (const it of vids) it.vid.pause();
   await Promise.all(vids.map(it => waitSeek(it.vid, 0)));
-  const fps = 30, br = Math.min(40e6, Math.round(w * hh * fps * 0.12)), E = await makeMp4Encoder(w, hh, fps, br);
+  const fps = 30, br = Math.min(40e6, Math.round(w * hh * fps * 0.12)), E = await makeMp4Encoder(w, hh, fps, br, true);
   if (!V.exporting) { if (E) closeEncoder(E); finish(); return; }
   paint();
+  if (E) { E.name = '拼圖作品.mp4'; E.manual = true; V.enc = E; collageEncodeLoop(E, vids, dur, fps, out, paint, stopVids, finish); return; }
   let rec = null;
   const chunks = [];
-  if (E) { E.src = out; E.name = '拼圖作品.mp4'; V.enc = E; }
-  else {
-    if (!window.MediaRecorder || !out.captureStream) { finish(); endExportUi(); toast('這個瀏覽器不支援影片匯出，請改用 Chrome 或 Edge', 4000); return; }
-    const stream = out.captureStream(fps);
-    const mime = ['video/mp4;codecs=avc1.42E01E', 'video/mp4', 'video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm'].find(m => MediaRecorder.isTypeSupported(m));
-    try { rec = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: br }); }
-    catch (e) { finish(); endExportUi(); toast('無法開始錄製：' + e.message, 4000); return; }
-    const ext = mime && mime.startsWith('video/mp4') ? 'mp4' : 'webm';
-    rec.ondataavailable = ev => { if (ev.data && ev.data.size) chunks.push(ev.data); };
-    rec.onstop = () => {
-      stream.getVideoTracks().forEach(t => t.stop());
-      const cancelled = V.cancelled;
-      finish(); endExportUi();
-      if (cancelled) { toast('已取消匯出'); return; }
-      saveFile('拼圖作品.' + ext, new Blob(chunks, { type: 'video/' + ext }));
-    };
-    V.rec = rec;
-  }
+  if (!window.MediaRecorder || !out.captureStream) { finish(); endExportUi(); toast('這個瀏覽器不支援影片匯出，請改用 Chrome 或 Edge', 4000); return; }
+  const stream = out.captureStream(fps);
+  const mime = ['video/mp4;codecs=avc1.42E01E', 'video/mp4', 'video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm'].find(m => MediaRecorder.isTypeSupported(m));
+  try { rec = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: br }); }
+  catch (e) { finish(); endExportUi(); toast('無法開始錄製：' + e.message, 4000); return; }
+  const ext = mime && mime.startsWith('video/mp4') ? 'mp4' : 'webm';
+  rec.ondataavailable = ev => { if (ev.data && ev.data.size) chunks.push(ev.data); };
+  rec.onstop = () => {
+    stream.getVideoTracks().forEach(t => t.stop());
+    const cancelled = V.cancelled;
+    finish(); endExportUi();
+    if (cancelled) { toast('已取消匯出'); return; }
+    saveFile('拼圖作品.' + ext, new Blob(chunks, { type: 'video/' + ext }));
+  };
+  V.rec = rec;
   for (const it of vids) it.vid.play().catch(() => {});
-  // 等每段影片都真的開始播再開始錄
   for (let i = 0; i < 40 && vids.some(it => it.vid.paused || it.vid.currentTime === 0); i++) await new Promise(r => setTimeout(r, 50));
   if (!V.exporting || V.cancelled) { finish(); return; }
-  let t0 = performance.now(), held = 0;
-  if (E) { E.t0 = t0; E.on = true; } else rec.start(1000);
+  const t0 = performance.now();
+  rec.start(1000);
   const step = now => {
     if (!V.exporting || V.cancelled) { finish(); return; }
-    // 編碼器跟不上時，影片先一起暫停等它，寧可匯出久一點也不要掉格
-    if (E && (E.ve.encodeQueueSize > 8 || (held && E.ve.encodeQueueSize > 2))) {
-      if (!held) { held = now; E.paused = true; for (const it of vids) it.vid.pause(); }
-      requestAnimationFrame(step); return;
-    }
-    if (held) { E.t0 += now - held; t0 += now - held; held = 0; E.paused = false; for (const it of vids) it.vid.play().catch(() => {}); }
     const t = (now - t0) / 1000;
     paint();
-    if (E) encodeFrame(false);
     $('#exportBar').style.width = Math.min(100, t / dur * 100) + '%';
-    if (t >= dur) {
-      stopVids();
-      if (E) finishEncode().then(finish);
-      else if (rec.state !== 'inactive') rec.stop();
-      return;
+    if (t >= dur) { stopVids(); if (rec.state !== 'inactive') rec.stop(); return; }
+    requestAnimationFrame(step);
+  };
+  requestAnimationFrame(step);
+}
+
+// 逐格錄製：每一格的時間照影片實際播到的位置算，不照時鐘。
+// 手機畫不夠快時，把影片放慢播（例如半速），每一格都來得及畫；錄出來的影片還是正常速度，不會掉格
+function collageEncodeLoop(E, vids, dur, fps, out, paint, stopVids, finish) {
+  const total = Math.max(1, Math.round(dur * fps));
+  const master = vids.reduce((a, b) => ((b.vid.duration || 0) > (a.vid.duration || 0) ? b : a)).vid;
+  let idx = 0, rate = 1, avg = 1000 / 60, lastNow = 0, lastCT = 0, ended = false, held = false;
+  const setRate = r => { rate = r; for (const it of vids) it.vid.playbackRate = r; if (r === 1) master.loop = true; };
+  // 最長那段影片當時鐘：錄製期間不重複，播完就停在最後一格
+  master.loop = false;
+  // 影片真的換到下一格畫面時瀏覽器會通知（mediaTime 是這格畫面的時間），比 currentTime 準，不會抓到還沒換上的舊畫面
+  let shown = -1;
+  const rvfc = typeof master.requestVideoFrameCallback === 'function';
+  if (rvfc) { const cb = (n, m) => { shown = Math.max(shown, m.mediaTime); if (V.exporting) master.requestVideoFrameCallback(cb); }; master.requestVideoFrameCallback(cb); }
+  const playAll = () => { for (const it of vids) it.vid.play().catch(() => {}); };
+  const done = () => {
+    setRate(1); stopVids();
+    finishEncode().then(finish);
+  };
+  E.on = true;
+  // 一開始先用比較慢的速度，看手機跑得動再加快
+  setRate(0.5);
+  playAll();
+  const step = now => {
+    if (!V.exporting || V.cancelled) { setRate(1); finish(); return; }
+    if (E.error) { setRate(1); stopVids(); finishEncode().then(finish); return; }
+    if (lastNow) avg = avg * 0.85 + Math.min(500, now - lastNow) * 0.15;
+    lastNow = now;
+    // 編碼器跟不上：影片先一起暫停等它
+    if (E.ve.encodeQueueSize > 6 || (held && E.ve.encodeQueueSize > 1)) {
+      if (!held) { held = true; for (const it of vids) it.vid.pause(); }
+      requestAnimationFrame(step); return;
+    }
+    if (held) { held = false; playAll(); }
+    const ct = master.currentTime;
+    if (ct + 0.5 < lastCT || master.ended) ended = true; else lastCT = Math.max(lastCT, ct);
+    // 影片被系統停掉（例如切到別的畫面再回來）就再播一次
+    if (!ended && master.paused) playAll();
+    const T = ended ? dur : Math.min(dur, rvfc ? Math.max(shown, lastCT - 0.25) : lastCT);
+    // 每畫一次大約推進多少影片時間；要讓它不超過一格，必要時放慢
+    const want = Math.max(0.1, Math.min(1, (1000 / fps) / avg * 0.8));
+    if (Math.abs(want - rate) > rate * 0.2) setRate(want);
+    // 影片已經播到下一格的時間才畫，一次只送一格，所以不會有重複的停格
+    if (idx / fps <= T + 0.001 || ended) {
+      paint();
+      const key = idx % (fps * 2) === 0;
+      const frame = new VideoFrame(out, { timestamp: Math.round(idx * 1e6 / fps), duration: Math.round(1e6 / fps) });
+      try { E.ve.encode(frame, { keyFrame: key }); } catch (e) { E.error = e; }
+      frame.close();
+      idx++;
+      $('#exportBar').style.width = Math.min(100, idx / total * 100) + '%';
+      if (idx >= total) { done(); return; }
     }
     requestAnimationFrame(step);
   };

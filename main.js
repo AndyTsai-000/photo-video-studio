@@ -95,7 +95,7 @@ function openExportDialog() {
     const [w, hh] = collageVideoSize(), sec = collageVideoDur();
     card.append(h('p', { text: '這張拼圖裡有影片，會匯出成 MP4 影片：' + w + ' × ' + hh + '，長度 ' + fmtTime(sec) + '（照最長的那段影片，短的會重複播）。' }));
     card.append(h('p', { text: '拼圖影片不含聲音。' }));
-    card.append(h('p', { text: '影片會照實際速度錄一次，需要 ' + fmtTime(sec) + '，匯出期間請讓畫面開著。' }));
+    card.append(h('p', { text: '影片會一格一格錄，大約需要 ' + fmtTime(sec) + '；手機比較慢時會放慢錄，花的時間會長一點，但錄出來不會卡。匯出期間請讓畫面開著。' }));
   } else if (mode !== 'video') {
     card.append(h('h3', { text: '格式' }));
     pick('fmt', [['jpg', 'JPG'], ['png', 'PNG（不失真）'], ['webp', 'WebP']]);
