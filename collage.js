@@ -158,9 +158,19 @@ async function collageVideoItem(f) {
   v.muted = true; v.loop = true; v.playsInline = true; v.preload = 'auto';
   v.setAttribute('playsinline', ''); v.setAttribute('muted', '');
   v.src = URL.createObjectURL(f);
-  await new Promise((res, rej) => { v.onloadeddata = res; v.onerror = () => rej(new Error('format')); });
+  // 只等「知道影片大小和長度」就好：iPhone 等手機在影片播放前不會先載入畫面，等畫面會一直卡住
+  await new Promise((res, rej) => {
+    const t = setTimeout(() => rej(new Error('timeout')), 20000);
+    v.onloadedmetadata = () => { clearTimeout(t); res(); };
+    v.onerror = () => { clearTimeout(t); rej(new Error('format')); };
+  });
   if (!isFinite(v.duration)) await waitSeek(v, 1e7);   // 有些錄製檔一開始不知道長度
+  // 沒聲音的影片手機允許直接播：播一下再停，讓瀏覽器把畫面載進來
+  if (v.readyState < 2) {
+    await Promise.race([v.play().then(() => v.pause()).catch(() => {}), new Promise(r => setTimeout(r, 3000))]);
+  }
   await waitSeek(v, Math.min(0.1, (isFinite(v.duration) && v.duration) ? v.duration / 2 : 0.1));
+  if (v.readyState < 2) await new Promise(r => { v.addEventListener('loadeddata', r, { once: true }); setTimeout(r, 3000); });
   const vw = v.videoWidth || 16, vh = v.videoHeight || 9, s = Math.min(1, 1280 / Math.max(vw, vh));
   const cv = mk(Math.round(vw * s), Math.round(vh * s));
   cv.getContext('2d').drawImage(v, 0, 0, cv.width, cv.height);
@@ -195,13 +205,16 @@ function collageLoop() {
 }
 document.addEventListener('visibilitychange', () => { if (!document.hidden) collageLoop(); });
 
+// 有些手機選出來的影片沒有標檔案種類，再看副檔名
+const isCollageVideo = f => f.type.startsWith('video/') || (!f.type && /\.(mp4|mov|m4v|webm|3gp|mkv)$/i.test(f.name));
 async function addCollageFiles(files) {
-  const imgs = files.filter(f => f.type.startsWith('image/') || f.type.startsWith('video/'));
+  const imgs = files.filter(f => f.type.startsWith('image/') || isCollageVideo(f));
   if (!imgs.length) return;
   const before = C.imgs.length;
+  if (imgs.some(isCollageVideo)) toast('正在讀取影片…');
   for (const f of imgs) {
     if (C.imgs.length >= COLLAGE_MAX) { toast('一張拼圖最多放 ' + COLLAGE_MAX + ' 張'); break; }
-    const isVid = f.type.startsWith('video/');
+    const isVid = isCollageVideo(f);
     if (isVid && C.imgs.filter(it => it.vid).length >= COLLAGE_VIDEO_MAX) { toast('一張拼圖最多放 ' + COLLAGE_VIDEO_MAX + ' 段影片，太多段手機會播不動'); continue; }
     try { C.imgs.push(isVid ? await collageVideoItem(f) : { cv: await fileToCanvas(f, 2400), ox: 0.5, oy: 0.5, zoom: 1 }); }
     catch (e) { toast('無法讀取 ' + f.name + (isVid ? '，這個瀏覽器可能不支援這種影片格式' : '')); }
@@ -307,7 +320,7 @@ function collagePanel() {
           if (!f) return;
           const sel = C.sel;
           try {
-            const nu = f.type.startsWith('video/') ? await collageVideoItem(f) : { cv: await fileToCanvas(f, 2400), ox: 0.5, oy: 0.5, zoom: 1 };
+            const nu = isCollageVideo(f) ? await collageVideoItem(f) : { cv: await fileToCanvas(f, 2400), ox: 0.5, oy: 0.5, zoom: 1 };
             if (nu.vid && !it.vid && C.imgs.filter(x => x.vid).length >= COLLAGE_VIDEO_MAX) { dropCollageVideo(nu); toast('一張拼圖最多放 ' + COLLAGE_VIDEO_MAX + ' 段影片'); return; }
             dropCollageVideo(it); C.imgs[sel] = nu; collagePanel(); drawCollage();
           } catch (e) { toast('無法讀取 ' + f.name); }

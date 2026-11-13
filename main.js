@@ -150,7 +150,7 @@ function openExportDialog() {
 const NEXT_WORK = {
   photo: ['再修一張', async () => { const [f] = await pickFiles($('#fileImg')); if (f) openForMode([f]); }],
   collage: ['再拼一張', async () => {
-    const files = (await pickFiles($('#fileCollage'))).filter(f => f.type.startsWith('image/') || f.type.startsWith('video/'));
+    const files = (await pickFiles($('#fileCollage'))).filter(f => f.type.startsWith('image/') || isCollageVideo(f));
     if (!files.length) return;
     collageReset();
     addCollageFiles(files);
