@@ -794,7 +794,7 @@ Object.assign(PANELS, {
   body(el) {
     el.append(h('h2', { text: '美體' }));
     const B = P.body && P.body.out === P.base ? P.body : null;
-    if (!B) { prepareBody(); el.append(h('p', { text: '正在找出身形…第一次使用要下載約 9MB 的模型。' })); return; }
+    if (!B) { el.append(h('p', { text: '正在找出身形…第一次使用要下載約 9MB 的模型。' })); prepareBody(); return; }
     if (B.busy) { el.append(h('p', { text: '正在找出身形…第一次使用要下載約 9MB 的模型。' })); return; }
     if (B.none) { el.append(h('p', { class: 'warn', text: '找不到人的身體。請用拍到肩膀和腰的照片（全身照效果最好）。' })); return; }
     const live = key => v => { B[key] = v; applyBody(); };

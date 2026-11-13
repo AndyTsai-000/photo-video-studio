@@ -399,10 +399,12 @@ input[type="color"] { width: 34px; height: 28px; padding: 0; border: 1px solid v
 /* 匯出完成後的「接下來」 */
 .done-bar {
   position: fixed; left: 50%; top: calc(64px + env(safe-area-inset-top, 0px)); transform: translateX(-50%); z-index: 15;
-  display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 12px 40px 12px 16px; width: max-content; max-width: calc(100% - 32px);
+  display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 12px 40px 12px 16px; width: max-content; max-width: calc(100% - 32px); box-sizing: border-box;
   background: var(--raised); border: 1px solid var(--accent); border-radius: 12px; box-shadow: 0 8px 30px rgba(0, 0, 0, .5);
-  animation: card-in .18s ease-out;
+  animation: done-in .18s ease-out;
 }
+/* 出現動畫要保留置中的位移，不然剛出現那一下會偏到右邊 */
+@keyframes done-in { from { opacity: 0; transform: translate(-50%, 14px); } }
 .done-bar strong { font-size: 14px; }
 .done-actions { display: flex; flex-wrap: wrap; gap: 6px; }
 .done-close { position: absolute; top: 6px; right: 6px; width: 28px; height: 28px; border: 0; border-radius: 50%; background: none; color: var(--muted); font-size: 18px; cursor: pointer; }
@@ -461,5 +463,24 @@ input[type="color"] { width: 34px; height: 28px; padding: 0; border: 1px solid v
 @media (prefers-reduced-motion: reduce) {
   .btn, .modes button, .tools button, .auto-style, .thumbs button, .stickers button, .layouts button, .group > summary { transition: none; }
   .btn:active:not(:disabled), .stickers button:active, .thumbs button:active, .layouts button:active, .home-card:active { transform: none; }
-  #toast:not([hidden]), #dlg:not([hidden]) .export-card, #exportOverlay:not([hidden]) .export-card { animation: none; }
+  #toast:not([hidden]), #dlg:not([hidden]) .export-card, #exportOverlay:not([hidden]) .export-card, .done-bar { animation: none; }
+}
+
+/* 很窄的手機（360 以下）：五個模式分頁要全部擠得下，不用左右滑也看得到「虛擬人」 */
+@media (max-width: 400px) {
+  .modes { gap: 0; }
+  .modes button { padding: 5px 7px; }
+  #photoInfo { white-space: nowrap; font-size: 12px; }
+}
+/* 320～360 的小手機：畫面下方那一列和剪輯的時間軸按鈕縮小一點，才不會超出畫面、整頁左右晃 */
+@media (max-width: 360px) {
+  .stage-foot { padding: 6px 10px; gap: 6px; flex-wrap: wrap; }
+  .zoom-ctl { gap: 3px; }
+  .tl-tools { padding: 4px 10px; gap: 3px; }
+  .tl-tools .btn.small { padding: 3px 5px; }
+  .time { font-size: 10.5px; }
+  /* 頂部名稱和按鈕擠在同一列，不要折成兩列佔掉畫面 */
+  .brand { font-size: 16px; }
+  .bar { gap: 6px 8px; }
+  .bar-actions .btn { padding: 5px 6px; font-size: 12.5px; }
 }
