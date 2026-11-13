@@ -141,6 +141,8 @@ select {
 .zoom-ctl { display: inline-flex; align-items: center; gap: 6px; margin-left: auto; font-variant-numeric: tabular-nums; }
 .empty { display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 24px 16px; text-align: center; color: var(--muted); }
 .empty strong { font-size: 20px; color: var(--fg); }
+/* 空白提示的寬度不能超過畫面，說明文字要自己換行，才會保持在正中間 */
+.fitbox > .empty { flex: 0 1 auto; max-width: min(100%, 30em); box-sizing: border-box; }
 .canvas-wrap { position: relative; box-shadow: 0 8px 30px rgba(0, 0, 0, .45); }
 .canvas-wrap canvas { display: block; width: 100%; height: 100%; touch-action: none; }
 .stage-foot {
