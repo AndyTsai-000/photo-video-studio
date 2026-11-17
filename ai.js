@@ -28,7 +28,15 @@ async function getSession(url, budget) {
     sessions.delete(k); total -= v.size;
   }
   post({ type: 'stage', text: '正在載入 AI 模型…' });
-  const s = await ORT.InferenceSession.create(bytes, ORT_OPTS);
+  let s;
+  try { s = await ORT.InferenceSession.create(bytes, ORT_OPTS); }
+  catch (e) {
+    // 快取裡的模型壞了（例如之前下載到一半斷線）：刪掉重新下載一次
+    bytes = null;
+    try { const cache = await caches.open('ai-models'); await cache.delete(url); } catch (err) { /* 沒有快取 */ }
+    bytes = await fetchCached(url);
+    s = await ORT.InferenceSession.create(bytes, ORT_OPTS);
+  }
   bytes = null;
   sessions.set(url, { s, size, used: Date.now() });
   return s;
@@ -56,6 +64,8 @@ async function fetchCached(url) {
     buf.set(value, got); got += value.length;
     post({ type: 'download', progress: total ? got / total : 0 });
   }
+  // 下載不完整（網路斷掉）就不要存進快取，不然之後每次都會讀到壞掉的模型
+  if (total && !res.headers.get('content-encoding') && got < total) throw new Error('模型下載不完整，請檢查網路後再試一次');
   if (got !== buf.length) buf = buf.slice(0, got);
   try { if (cache) { await cache.put(url, new Response(buf)); for (const u of OLD_URLS) await cache.delete(u); } } catch (e) { /* 快取滿了就算了 */ }
   return buf;

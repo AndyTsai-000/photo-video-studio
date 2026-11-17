@@ -799,7 +799,7 @@ function vPanel() {
   }
 
   el.append(h('h2', { text: '影片設定' }));
-  el.append(h('button', { class: 'btn primary wide', text: '加入影片或圖片', onclick: async () => addMedia(await pickFiles($('#fileMedia'))) }));
+  // 加入素材統一用上方的「加入素材」，這裡不再放一顆一樣的
   el.append(h('button', {
     class: 'btn wide', text: '在播放頭的片段加一段文字', onclick: () => {
       const L = locate(Math.min(V.t, Math.max(0, totalDur() - 0.001)));

@@ -325,7 +325,8 @@ function collagePanel() {
   let el = root;
   el.replaceChildren();
   el.append(h('h2', { text: '拼圖' }));
-  el.append(h('button', { class: 'btn primary wide', text: '加入照片或影片（最多 ' + COLLAGE_MAX + ' 張）', onclick: async () => addCollageFiles(await pickFiles($('#fileCollage'))) }));
+  // 加入素材統一用上方的「加入素材」，這裡不再放一顆一樣的
+  if (C.imgs.length < COLLAGE_MAX) el.append(h('p', { text: '用上方的「加入素材」再加照片或影片，最多 ' + COLLAGE_MAX + ' 張。' }));
   if (!C.imgs.length) { el.append(h('p', { text: '先選照片或影片。選了幾張，這裡就會出現那個張數可以用的版型。' })); return; }
 
   el = group(root, 'col.layout', C.imgs.length + ' 格的版型');

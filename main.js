@@ -34,7 +34,7 @@ function setMode(mode) {
   if (mode === 'avatar') { syncAvatarEmpty(); avatarPanel(); }
   $$('.modes button').forEach(b => b.setAttribute('aria-selected', String(b.dataset.mode === mode)));
   $('#undoBtn').hidden = $('#redoBtn').hidden = mode === 'collage';
-  $('#openBtn').textContent = OPEN_LABEL[mode] || '';
+  $('#openLabel').textContent = OPEN_LABEL[mode] || '';
   syncHistButtons();
   syncLinkBtn();
   refit();
@@ -194,7 +194,6 @@ function showDoneBar() {
   }
   if (mode === 'photo') btn('', '拿去拼圖', () => { const c = mk(4, 4); renderPhoto(c, 0, { final: true }); collageReset(); C.imgs = [{ cv: c, ox: 0.5, oy: 0.5, zoom: 1 }]; setMode('collage'); collagePanel(); drawCollage(); toast('再加幾張照片就能拼成一張'); }, '把修好的照片放進拼圖');
   if (shareLast()) btn('', '分享', async () => { try { await navigator.share({ files: [shareLast()] }); } catch (e) { /* 取消 */ } }, '傳到 LINE、Instagram 等 App');
-  btn('', '繼續修改', () => {}, '留在這件作品，繼續編輯');
   btn('ghost', '回首頁', () => setMode('home'));
   $('#doneActions').replaceChildren(...btns);
   $('#doneBar').hidden = false;
